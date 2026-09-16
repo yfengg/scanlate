@@ -1,0 +1,115 @@
+[
+ {
+  "form": "さん",
+  "kind": "address_affix",
+  "direction": "peer",
+  "register": "POLITE",
+  "convention_key": "san",
+  "options": [
+   "-san",
+   "Mr./Ms.",
+   "drop"
+  ],
+  "note": "Default polite address affix."
+ },
+ {
+  "form": "様",
+  "kind": "address_affix",
+  "direction": "upward",
+  "register": "FORMAL",
+  "convention_key": "sama",
+  "options": [
+   "-sama",
+   "Lord/Lady",
+   "sir/madam"
+  ],
+  "note": "Strong deference; also used for customers."
+ },
+ {
+  "form": "さま",
+  "kind": "address_affix",
+  "direction": "upward",
+  "register": "FORMAL",
+  "convention_key": "sama",
+  "options": [
+   "-sama",
+   "Lord/Lady"
+  ],
+  "note": "Kana form of 様."
+ },
+ {
+  "form": "くん",
+  "kind": "address_affix",
+  "direction": "downward",
+  "register": "CASUAL",
+  "convention_key": "kun",
+  "options": [
+   "-kun",
+   "drop"
+  ],
+  "note": "Toward juniors or male peers."
+ },
+ {
+  "form": "君",
+  "kind": "address_affix",
+  "direction": "downward",
+  "register": "CASUAL",
+  "convention_key": "kun",
+  "options": [
+   "-kun",
+   "drop"
+  ],
+  "note": "Kanji form; also a plain second-person pronoun."
+ },
+ {
+  "form": "ちゃん",
+  "kind": "address_affix",
+  "direction": "intimate",
+  "register": "CASUAL",
+  "convention_key": "chan",
+  "options": [
+   "-chan",
+   "diminutive",
+   "drop"
+  ],
+  "note": "Affectionate or childish."
+ },
+ {
+  "form": "先輩",
+  "kind": "title",
+  "direction": "upward",
+  "register": "POLITE",
+  "convention_key": "senpai",
+  "options": [
+   "senpai",
+   "upperclassman",
+   "name only"
+  ],
+  "note": "Senior in school or workplace; usable as a standalone address."
+ },
+ {
+  "form": "先生",
+  "kind": "title",
+  "direction": "upward",
+  "register": "POLITE",
+  "convention_key": "sensei",
+  "options": [
+   "sensei",
+   "teacher",
+   "doctor"
+  ],
+  "note": "Teacher, doctor, or licensed professional."
+ },
+ {
+  "form": "殿",
+  "kind": "address_affix",
+  "direction": "upward",
+  "register": "FORMAL",
+  "convention_key": "dono",
+  "options": [
+   "-dono",
+   "Lord"
+  ],
+  "note": "Archaic or formal written register."
+ }
+]

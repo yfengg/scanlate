@@ -1,0 +1,11 @@
+[
+ {"form": "兄貴", "relation": "older_brother", "options": ["Aniki", "bro", "big brother"], "may_be_non_kin": true, "register": "CASUAL", "note": "Rough affectionate form; common for gang or club seniors who are not actual family."},
+ {"form": "お兄ちゃん", "relation": "older_brother", "options": ["big brother", "onii-chan", "name"], "may_be_non_kin": true, "register": "CASUAL", "note": "Childish and affectionate."},
+ {"form": "兄さん", "relation": "older_brother", "options": ["brother", "nii-san"], "may_be_non_kin": true, "register": "NEUTRAL", "note": null},
+ {"form": "姉さん", "relation": "older_sister", "options": ["sis", "nee-san"], "may_be_non_kin": true, "register": "NEUTRAL", "note": null},
+ {"form": "お姉ちゃん", "relation": "older_sister", "options": ["big sister", "onee-chan"], "may_be_non_kin": true, "register": "CASUAL", "note": null},
+ {"form": "父さん", "relation": "father", "options": ["Dad", "Father"], "may_be_non_kin": false, "register": "NEUTRAL", "note": null},
+ {"form": "母さん", "relation": "mother", "options": ["Mom", "Mother"], "may_be_non_kin": false, "register": "NEUTRAL", "note": null},
+ {"form": "先輩", "relation": "senior", "options": ["senpai", "upperclassman", "name only"], "may_be_non_kin": true, "register": "POLITE", "note": "Not kinship, but carries the same address-form decision."},
+ {"form": "後輩", "relation": "junior", "options": ["kouhai", "junior"], "may_be_non_kin": true, "register": "NEUTRAL", "note": null}
+]

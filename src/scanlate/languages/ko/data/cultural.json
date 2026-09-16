@@ -1,0 +1,7 @@
+[
+ {"form": "선배", "key": "sunbae", "domain": "hierarchy", "impact": 2, "note": "Seniority is grammatically enforced in Korean; flattening it removes the relationship English readers need.", "suggestions": ["sunbae", "senior"]},
+ {"form": "수고하셨습니다", "key": "sugohasyeotseumnida", "domain": "idiom", "impact": 2, "note": "Acknowledges completed effort, said downward or between peers; not simply 'thank you'.", "suggestions": ["good work", "thanks for your hard work"]},
+ {"form": "화이팅", "key": "hwaiting", "domain": "idiom", "impact": 1, "note": "Encouragement, from English 'fighting'; means 'you can do it'.", "suggestions": ["you got this", "go for it"]},
+ {"form": "눈치", "key": "nunchi", "domain": "social", "impact": 2, "note": "The skill of reading a room; no single English word covers it.", "suggestions": ["reading the room", "tact"]},
+ {"form": "재벌", "key": "chaebol", "domain": "social", "impact": 1, "note": "Family-controlled conglomerate; a specific Korean institution.", "suggestions": ["chaebol", "conglomerate family"]}
+]

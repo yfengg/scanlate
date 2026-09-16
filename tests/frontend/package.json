@@ -1,0 +1,12 @@
+{
+  "name": "scanlate-frontend-tests",
+  "private": true,
+  "type": "module",
+  "description": "jsdom suite for the workbench frontend. Run: npm install && node test_workbench.mjs",
+  "scripts": {
+    "test": "node test_workbench.mjs"
+  },
+  "devDependencies": {
+    "jsdom": "^24.0.0"
+  }
+}

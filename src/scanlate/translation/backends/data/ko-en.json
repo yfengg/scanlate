@@ -1,0 +1,17 @@
+{
+ "phrases": [
+  {"source": "형, 진짜 괜찮아?", "target": "Hyung, are you really okay?", "register": "CASUAL"},
+  {"source": "저희가 처리하겠습니다.", "target": "We will handle it.", "register": "FORMAL"},
+  {"source": "선배님, 이거 봐 주세요.", "target": "Sunbae, please take a look at this.", "register": "POLITE"},
+  {"source": "야, 닥쳐.", "target": "Hey, shut up.", "register": "CRUDE"},
+  {"source": "형은 항상 그래.", "target": "Hyung is always like that.", "register": "CASUAL"},
+  {"source": "수고하셨습니다.", "target": "Thank you for your hard work.", "register": "FORMAL",
+   "alternatives": [{"text": "Good work today.", "note": "more natural", "reason": "register"}]},
+  {"source": "대박!", "target": "No way!", "register": "CASUAL",
+   "alternatives": [{"text": "Awesome!", "note": "positive reading", "reason": "literal"}]}
+ ],
+ "lexicon": {
+  "형": "hyung", "누나": "noona", "오빠": "oppa", "언니": "unnie", "선배": "sunbae",
+  "진짜": "really", "괜찮아": "okay", "우리": "we"
+ }
+}

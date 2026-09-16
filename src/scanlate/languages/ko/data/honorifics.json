@@ -1,0 +1,8 @@
+[
+ {"form": "님", "kind": "address_affix", "direction": "upward", "register": "FORMAL", "convention_key": "nim", "options": ["-nim", "Mr./Ms.", "sir/madam"], "note": "Attaches to names and titles; marks clear deference."},
+ {"form": "씨", "kind": "address_affix", "direction": "peer", "register": "POLITE", "convention_key": "ssi", "options": ["-ssi", "Mr./Ms.", "drop"], "note": "Polite but not deferential; awkward toward a clear senior."},
+ {"form": "선배", "kind": "title", "direction": "upward", "register": "POLITE", "convention_key": "sunbae", "options": ["sunbae", "senior", "name only"], "note": "Senior in school or work; usable as a standalone address."},
+ {"form": "후배", "kind": "title", "direction": "downward", "register": "NEUTRAL", "convention_key": "hubae", "options": ["hubae", "junior"], "note": null},
+ {"form": "사장님", "kind": "title", "direction": "upward", "register": "FORMAL", "convention_key": "sajangnim", "options": ["boss", "sir", "president"], "note": "Company head; used as direct address where English would use a name."},
+ {"form": "선생님", "kind": "title", "direction": "upward", "register": "FORMAL", "convention_key": "seonsaengnim", "options": ["teacher", "sir", "doctor"], "note": null}
+]

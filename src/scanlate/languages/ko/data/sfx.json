@@ -1,0 +1,23 @@
+[
+ {"form": "두근", "category": "heartbeat", "subtype": null, "intensity": 2, "note": "Heartbeat; doubled for a sustained flutter."},
+ {"form": "쿵", "category": "impact", "subtype": "heavy", "intensity": 2, "note": null},
+ {"form": "쾅", "category": "impact", "subtype": "explosion", "intensity": 3, "note": null},
+ {"form": "탁", "category": "impact", "subtype": "sharp", "intensity": 1, "note": null},
+ {"form": "퍽", "category": "impact", "subtype": "punch", "intensity": 2, "note": null},
+ {"form": "저벅", "category": "footsteps", "subtype": "heavy", "intensity": 2, "note": null},
+ {"form": "또각", "category": "footsteps", "subtype": "hard_sole", "intensity": 1, "note": null},
+ {"form": "휙", "category": "movement", "subtype": "quick", "intensity": 2, "note": null},
+ {"form": "스륵", "category": "movement", "subtype": "slide", "intensity": 1, "note": null},
+ {"form": "바스락", "category": "rustling", "subtype": "dry", "intensity": 1, "note": null},
+ {"form": "우르르", "category": "weather", "subtype": "thunder", "intensity": 2, "note": null},
+ {"form": "쏴", "category": "weather", "subtype": "rain", "intensity": 2, "note": null},
+ {"form": "부르릉", "category": "machinery", "subtype": "motor", "intensity": 2, "note": null},
+ {"form": "웅성", "category": "voice", "subtype": "crowd_murmur", "intensity": 2, "note": null},
+ {"form": "후", "category": "voice", "subtype": "sigh", "intensity": 1, "note": null},
+ {"form": "꺄악", "category": "voice", "subtype": "scream", "intensity": 3, "note": null},
+ {"form": "멍멍", "category": "animal", "subtype": "dog", "intensity": 2, "note": null},
+ {"form": "야옹", "category": "animal", "subtype": "cat", "intensity": 1, "note": null},
+ {"form": "덜덜", "category": "emotional", "subtype": "trembling", "intensity": 2, "note": null},
+ {"form": "씨익", "category": "emotional", "subtype": "smile", "intensity": 1, "note": null},
+ {"form": "정적", "category": "silence", "subtype": null, "intensity": 1, "note": "Written silence."}
+]

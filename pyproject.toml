@@ -1,0 +1,32 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "scanlate"
+version = "0.1.0"
+description = "Language-neutral comic translation workbench with pluggable language adapters and MT backends"
+requires-python = ">=3.11"
+dependencies = ["fastapi>=0.110", "pydantic>=2", "uvicorn>=0.29"]
+
+[project.optional-dependencies]
+fuzzy = ["rapidfuzz>=3"]
+# transformers 5 removed the generic "translation" pipeline the OPUS
+# backend uses; see OpusMtBackend.available().
+mt = ["transformers>=4.40,<5", "torch>=2.2", "sentencepiece>=0.2"]
+ja = ["fugashi>=1.3", "unidic-lite>=1.0.8"]
+ko = ["kiwipiepy>=0.17"]
+dev = ["pytest>=8", "httpx>=0.27", "rapidfuzz>=3"]
+
+[project.scripts]
+scanlate = "scanlate.__main__:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+"*" = ["data/*.json"]
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]
+testpaths = ["tests"]

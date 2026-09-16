@@ -1,0 +1,17 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+*.egg-info/
+.pytest_cache/
+
+# Node (frontend tests only)
+node_modules/
+package-lock.json
+
+# Runtime artifacts
+*.db
+*.sqlite
+*.sqlite3
+media/

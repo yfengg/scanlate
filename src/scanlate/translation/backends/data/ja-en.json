@@ -1,0 +1,23 @@
+{
+ "phrases": [
+  {"source": "田中先輩、ちょっといいですか？", "target": "Tanaka-senpai, do you have a second?", "register": "POLITE"},
+  {"source": "うるせぇな…今忙しいんだよ。", "target": "Please be quiet, I am busy right now.", "register": "POLITE",
+   "alternatives": [
+    {"text": "Shut up… I'm busy right now.", "note": "closer tone", "reason": "register"},
+    {"text": "Quit bugging me… I'm busy.", "note": "freer", "reason": "register"},
+    {"text": "You're so noisy… I'm busy right now.", "note": "more literal", "reason": "literal"}]},
+  {"source": "その日、雨は止まなかった。", "target": "The rain didn't let up that day.", "register": "NEUTRAL"},
+  {"source": "兄貴、助けてくれ！", "target": "Big bro, help me out!", "register": "CASUAL"},
+  {"source": "兄貴はどこだ？", "target": "Where's big bro?", "register": "CASUAL"},
+  {"source": "田中先輩、おはようございます。", "target": "Good morning, Tanaka-senpai.", "register": "POLITE"},
+  {"source": "お疲れ様でした。", "target": "Thank you for your work today.", "register": "POLITE",
+   "alternatives": [{"text": "Good work today.", "note": "more natural", "reason": "register"}]},
+  {"source": "申し訳ございません。", "target": "I sincerely apologize.", "register": "FORMAL"},
+  {"source": "何してるの？", "target": "What are you doing?", "register": "CASUAL"},
+  {"source": "行くぞ！", "target": "Let's go!", "register": "CASUAL"}
+ ],
+ "lexicon": {
+  "先輩": "senpai", "後輩": "kouhai", "兄貴": "big bro", "雨": "rain", "今": "now",
+  "忙しい": "busy", "助けて": "help", "行く": "go", "何": "what", "誰": "who"
+ }
+}

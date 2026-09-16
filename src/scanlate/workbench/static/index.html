@@ -1,0 +1,1405 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Scanlate workbench</title>
+<style>
+  :root {
+    --paper: #ffffff;
+    --board: #e7e5df;
+    --ink: #14161a;
+    --graphite: #676c74;
+    --rule: #d7d4cc;
+    --pencil: #c62f22;
+    --approved: #2c6a51;
+    --sans: "Inter", "Helvetica Neue", Arial, system-ui, sans-serif;
+    --cjk: "Hiragino Sans", "Yu Gothic", "Noto Sans JP", "Noto Sans KR",
+           "Malgun Gothic", "Microsoft YaHei", sans-serif;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--board); color: var(--ink);
+    font-family: var(--sans); font-size: 15px; line-height: 1.5;
+    -webkit-font-smoothing: antialiased; }
+  header { position: sticky; top: 0; z-index: 5; background: var(--paper);
+    border-bottom: 1px solid var(--rule); padding: 14px 24px 0; }
+  .top { display: flex; flex-wrap: wrap; gap: 16px; align-items: baseline; }
+  .project { font-size: 17px; font-weight: 600; letter-spacing: -0.01em; }
+  .pair { color: var(--graphite); }
+  .counts { margin-left: auto; display: flex; gap: 18px; color: var(--graphite); align-items: baseline; }
+  .counts b { color: var(--ink); font-weight: 600; }
+  .counts .flagged b { color: var(--pencil); }
+  .diag { display: flex; gap: 6px; align-items: center; color: var(--graphite); font-size: 13px; cursor: pointer; }
+  nav { display: flex; gap: 22px; margin-top: 12px; }
+  nav button { font: inherit; background: none; border: none; cursor: pointer;
+    color: var(--graphite); padding: 6px 0 9px; border-bottom: 2px solid transparent; }
+  nav button:hover { color: var(--ink); }
+  nav button[aria-current="page"] { color: var(--ink); border-bottom-color: var(--ink); }
+  .filters { display: flex; gap: 4px; padding: 12px 24px 0; flex-wrap: wrap; }
+  .filters button { font: inherit; color: var(--graphite); background: none;
+    border: 1px solid transparent; border-radius: 999px; padding: 4px 12px; cursor: pointer; }
+  .filters button:hover { color: var(--ink); }
+  .filters button[aria-pressed="true"] { color: var(--ink); background: var(--paper); border-color: var(--rule); }
+  main { padding: 12px 24px 96px; max-width: 1040px; }
+  main.wide { max-width: none; }
+
+  .seg { display: grid; grid-template-columns: 44px 1fr; background: var(--paper);
+    border: 1px solid var(--rule); border-radius: 3px; margin-top: 10px; }
+  .seg[data-focused="true"] { border-color: var(--ink); }
+  .seg[data-status="approved"] { border-color: #e2e0da; }
+  .seg[data-status="approved"] .meta,
+  .seg[data-status="approved"] .warn,
+  .seg[data-status="approved"] .alts,
+  .seg[data-status="approved"] .actions { opacity: .55; }
+  .gutter { border-right: 1px solid var(--rule); padding: 14px 0; text-align: center;
+    color: var(--graphite); font-variant-numeric: tabular-nums; }
+  .gutter .mark { display: block; margin-top: 6px; font-size: 13px; }
+  .seg[data-flagged="true"] .gutter .mark { color: var(--pencil); }
+  .seg[data-status="approved"] .gutter .mark { color: var(--approved); }
+  .body { padding: 12px 18px 14px; }
+  .kind { color: var(--graphite); font-size: 13px; }
+  .kind .lang { border: 1px solid var(--rule); border-radius: 2px; padding: 0 5px; margin-left: 6px; }
+  .source { font-family: var(--cjk); font-size: 21px; line-height: 1.75;
+    margin: 6px 0 12px; max-width: 34em; }
+  .source mark { background: none; color: inherit; padding-bottom: 1px; }
+  .source mark.term { border-bottom: 2px solid var(--pencil); }
+  .source mark.term:not(.locked) { border-bottom-style: dotted; }
+  .source mark.ambiguity { background: rgba(198,47,34,.08); }
+  .source mark.entity { border-bottom: 1px solid var(--rule); }
+  textarea { width: 100%; max-width: 46em; font: inherit; font-size: 16px; line-height: 1.55;
+    color: var(--ink); background: var(--paper); border: 1px solid var(--rule);
+    border-radius: 2px; padding: 8px 10px; resize: vertical; min-height: 44px; }
+  textarea:focus { outline: 2px solid var(--ink); outline-offset: -1px; border-color: transparent; }
+  .meta { display: flex; flex-wrap: wrap; gap: 6px; margin: 10px 0 0; align-items: center; }
+  .signal { font-size: 13px; border: 1px solid var(--ink); border-radius: 2px; padding: 1px 8px; }
+  .signal.soft { border-color: var(--rule); color: var(--graphite); }
+  .signal.term { border-color: var(--pencil); color: var(--pencil); }
+  .uncertain { color: var(--graphite); font-size: 13px; }
+  details.diagnostics { margin-top: 8px; }
+  details.diagnostics summary { color: var(--graphite); font-size: 13px; cursor: pointer; }
+  details.diagnostics dl { display: grid; grid-template-columns: max-content 1fr;
+    gap: 2px 14px; margin: 8px 0 0; font-size: 13px; color: var(--graphite); }
+  details.diagnostics dt { color: var(--ink); }
+  details.diagnostics dd { margin: 0; }
+  .alts { margin-top: 10px; max-width: 46em; }
+  .alts summary { color: var(--graphite); font-size: 14px; cursor: pointer; }
+  .alts ul { list-style: none; margin: 8px 0 0; padding: 0; }
+  .alts li { display: flex; gap: 10px; align-items: baseline; padding: 4px 0;
+    border-top: 1px solid var(--rule); }
+  .alts .note { color: var(--graphite); font-size: 13px; }
+  .alts button { margin-left: auto; }
+  .warn { margin: 10px 0 0; padding: 0; list-style: none; max-width: 46em; }
+  .warn li { padding: 8px 0; border-top: 1px solid var(--rule); }
+  .warn .line { display: flex; gap: 8px; }
+  .warn .dot { flex: none; width: 7px; height: 7px; border-radius: 50%; margin-top: 7px; background: var(--graphite); }
+  .warn li[data-sev="ERROR"] .dot, .warn li[data-sev="WARNING"] .dot { background: var(--pencil); }
+  .warn .code { color: var(--graphite); font-size: 13px; }
+  .warn .offer { display: flex; flex-wrap: wrap; gap: 6px; margin: 8px 0 0 15px; }
+  .actions { display: flex; gap: 8px; align-items: center; margin-top: 12px; }
+  button.primary { font: inherit; cursor: pointer; border-radius: 2px;
+    border: 1px solid var(--ink); background: var(--ink); color: var(--paper); padding: 5px 14px; }
+  button.quiet { font: inherit; cursor: pointer; border-radius: 2px; background: none;
+    color: var(--graphite); border: 1px solid var(--rule); padding: 4px 11px; }
+  button.quiet:hover { color: var(--ink); border-color: var(--graphite); }
+  button:focus-visible { outline: 2px solid var(--pencil); outline-offset: 2px; }
+  .state { color: var(--approved); font-size: 14px; }
+  .learn { margin-top: 12px; padding: 10px 12px; border: 1px solid var(--ink);
+    border-radius: 2px; display: flex; flex-wrap: wrap; gap: 10px; align-items: center; }
+  .learn p { margin: 0; }
+  .learn .offer { margin-left: auto; display: flex; gap: 6px; }
+  .empty { background: var(--paper); border: 1px solid var(--rule); padding: 28px;
+    margin-top: 10px; max-width: 36em; }
+  .crumb { font: inherit; background: none; border: none; cursor: pointer; padding: 0 8px 0 0;
+    color: var(--graphite); }
+  .crumb:hover { color: var(--ink); }
+  .crumb::after { content: "/"; margin-left: 8px; color: var(--rule); }
+  .backend { font-size: 12px; border: 1px solid var(--rule); border-radius: 2px;
+    padding: 1px 7px; color: var(--graphite); }
+  .backend[data-level="warn"] { border-color: var(--pencil); color: var(--pencil); }
+  .home { display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+    gap: 12px; margin-top: 10px; max-width: 900px; }
+  .home .card { background: var(--paper); border: 1px solid var(--rule); border-radius: 3px;
+    padding: 18px 20px; }
+  .home h2 { margin: 0 0 14px; font-size: 16px; font-weight: 600; }
+  .home input, .home select { width: 100%; }
+  .project-list { list-style: none; margin: 0; padding: 0; }
+  .project-list li + li { border-top: 1px solid var(--rule); }
+  button.project { display: block; width: 100%; text-align: left; background: none;
+    border: none; font: inherit; padding: 10px 0; cursor: pointer; }
+  button.project:hover .name { text-decoration: underline; }
+  button.project .name { display: block; color: var(--ink); }
+  button.project .meta { display: block; color: var(--graphite); font-size: 13px; }
+  /* --- page workspace --- */
+  .page-wrap { display: grid; grid-template-columns: minmax(0,1fr) 400px; gap: 12px; margin-top: 10px; }
+  .stage { background: var(--paper); border: 1px solid var(--rule); border-radius: 3px;
+    display: flex; flex-direction: column; min-height: 70vh; }
+  .stage-bar { display: flex; gap: 8px; align-items: center; flex-wrap: wrap;
+    padding: 8px 10px; border-bottom: 1px solid var(--rule); font-size: 13px; color: var(--graphite); }
+  .stage-bar .spacer { margin-left: auto; }
+  .stage-bar select, .stage-bar input[type=file] { font: inherit; font-size: 13px; }
+  .canvas-scroll { overflow: auto; flex: 1; padding: 14px; background: #f3f2ef; }
+  .canvas-stage { position: relative; margin: 0 auto; background: var(--paper);
+    box-shadow: 0 1px 4px rgba(0,0,0,.15); }
+  .canvas-stage img { display: block; width: 100%; height: 100%; user-select: none; -webkit-user-drag: none; }
+  .region { position: absolute; border: 2px solid var(--pencil); background: rgba(198,47,34,.06);
+    cursor: move; }
+  .region[data-status="approved"] { border-color: var(--approved); background: rgba(44,106,81,.07); }
+  .region[data-empty="true"] { border-style: dashed; }
+  .region[data-selected="true"] { border-width: 3px; box-shadow: 0 0 0 2px rgba(20,22,26,.35); }
+  .region .tag { position: absolute; top: -1px; left: -1px; font-size: 11px; line-height: 1.4;
+    padding: 0 4px; background: var(--ink); color: var(--paper); white-space: nowrap; }
+  .region .handle { position: absolute; right: -5px; bottom: -5px; width: 11px; height: 11px;
+    background: var(--paper); border: 2px solid var(--ink); cursor: nwse-resize; }
+  .drawing { position: absolute; border: 2px dashed var(--ink); background: rgba(20,22,26,.05);
+    pointer-events: none; }
+  .canvas-stage.drawmode { cursor: crosshair; }
+  .panel { display: flex; flex-direction: column; gap: 10px; min-width: 0; }
+  .panel .seg { margin-top: 0; }
+  .panel .card { background: var(--paper); border: 1px solid var(--rule); border-radius: 3px;
+    padding: 12px 14px; }
+  .panel .card h3 { margin: 0 0 8px; font-size: 14px; font-weight: 600; }
+  .field { display: grid; grid-template-columns: 92px 1fr; gap: 8px; align-items: center;
+    margin-bottom: 8px; font-size: 14px; }
+  .field label { color: var(--graphite); }
+  .field select, .field input { font: inherit; font-size: 14px; padding: 3px 6px;
+    border: 1px solid var(--rule); border-radius: 2px; background: var(--paper); color: var(--ink); }
+  .source-edit { width: 100%; font-family: var(--cjk); font-size: 17px; line-height: 1.6;
+    min-height: 60px; }
+  .rowbtns { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 8px; }
+  .hint { color: var(--graphite); font-size: 13px; margin: 8px 0 0; }
+  .ocr-note { font-size: 13px; margin: 8px 0 0; padding: 6px 8px; border-radius: 2px;
+    border: 1px solid var(--rule); color: var(--graphite); }
+  .ocr-note[data-level="warn"] { border-color: var(--pencil); color: var(--pencil); }
+  .tools { display: inline-flex; border: 1px solid var(--rule); border-radius: 2px; overflow: hidden; }
+  .tool { font: inherit; font-size: 13px; background: var(--paper); border: none; cursor: pointer;
+    padding: 4px 12px; color: var(--graphite); }
+  .tool + .tool { border-left: 1px solid var(--rule); }
+  .tool[aria-pressed="true"] { background: var(--ink); color: var(--paper); }
+  .stage-bar .divider { width: 1px; height: 18px; background: var(--rule); }
+  .stage-bar .zoom { font-variant-numeric: tabular-nums; min-width: 42px; text-align: center; }
+  .working { padding: 6px 12px; font-size: 13px; color: var(--graphite);
+    border-bottom: 1px solid var(--rule); background: #faf9f7; }
+  .region { border-width: 1px; background: none; }
+  .region:hover { border-color: var(--ink); background: rgba(20,22,26,.04); }
+  .region .tag { display: none; font-size: 11px; }
+  .region:hover .tag, .region[data-selected="true"] .tag { display: block; }
+  .region[data-selected="true"] { border-width: 2px; border-color: var(--ink);
+    background: rgba(20,22,26,.05); box-shadow: 0 0 0 1px var(--paper); }
+  .region[data-empty="true"] { border-style: dashed; }
+  .region .reject { position: absolute; top: -10px; right: -10px; width: 20px; height: 20px;
+    border-radius: 50%; border: 1px solid var(--pencil); background: var(--paper);
+    color: var(--pencil); font: inherit; line-height: 1; cursor: pointer; padding: 0; }
+  .region .reject:hover { background: var(--pencil); color: var(--paper); }
+  .panel-head { display: flex; align-items: baseline; gap: 10px; margin-bottom: 10px; }
+  .panel-head h3 { margin: 0; }
+  .navbtns { margin-left: auto; display: flex; gap: 4px; }
+  .label { display: block; color: var(--graphite); font-size: 13px; margin: 12px 0 4px; }
+  .translation textarea { width: 100%; font: inherit; font-size: 16px; line-height: 1.5;
+    padding: 8px 10px; border: 1px solid var(--rule); border-radius: 2px; resize: vertical; }
+  .region-settings { margin-top: 14px; border-top: 1px solid var(--rule); padding-top: 10px; }
+  .region-settings summary { color: var(--graphite); font-size: 13px; cursor: pointer; }
+  .region-settings .field { margin-top: 8px; }
+  button.danger { color: var(--pencil); border-color: var(--rule); }
+  button.danger:hover { border-color: var(--pencil); }
+  .error { margin: 12px 24px -4px; padding: 8px 12px; max-width: 46em;
+    border: 1px solid var(--pencil); border-radius: 2px; color: var(--pencil); }
+  .empty h2 { margin: 0 0 8px; font-size: 16px; font-weight: 600; }
+  .empty p { margin: 0 0 12px; color: var(--graphite); }
+  .split { display: grid; grid-template-columns: minmax(0,1fr) 400px; gap: 12px; margin-top: 10px; }
+  .canvas { background: var(--paper); border: 1px solid var(--rule); border-radius: 3px;
+    min-height: 60vh; display: grid; place-items: center; padding: 32px; text-align: center; }
+  .canvas p { color: var(--graphite); max-width: 26em; }
+  .split .seg { margin-top: 0; }
+  footer { position: fixed; bottom: 0; left: 0; right: 0; background: var(--paper);
+    border-top: 1px solid var(--rule); padding: 8px 24px; font-size: 13px; color: var(--graphite); }
+  kbd { font: inherit; border: 1px solid var(--rule); border-bottom-width: 2px;
+    border-radius: 3px; padding: 0 4px; color: var(--ink); }
+  @media (max-width: 760px) {
+    header, main, .filters, footer { padding-left: 14px; padding-right: 14px; }
+    .seg { grid-template-columns: 32px 1fr; }
+    .split { grid-template-columns: 1fr; }
+    footer { display: none; }
+  }
+</style>
+</head>
+<body>
+<header>
+  <div class="top">
+    <button class="crumb" id="home-link" data-home="home" hidden>Projects</button>
+    <span class="project" id="project">Scanlate</span>
+    <span class="pair" id="pair"></span>
+    <span class="backend" id="backend" hidden></span>
+    <span class="counts">
+      <span class="flagged">Needs review <b id="c-flagged">0</b></span>
+      <span>Approved <b id="c-approved">0</b></span>
+      <span>Segments <b id="c-total">0</b></span>
+      <label class="diag"><input type="checkbox" id="diag-toggle"> Diagnostics</label>
+    </span>
+  </div>
+  <nav id="tabs">
+    <button data-tab="page">Page</button>
+    <button data-tab="review" aria-current="page">Review</button>
+    <button data-tab="glossary">Glossary</button>
+    <button data-tab="memory">Memory</button>
+  </nav>
+</header>
+
+<div class="filters" id="filters">
+  <button data-filter="all" aria-pressed="true">All</button>
+  <button data-filter="flagged" aria-pressed="false">Needs review</button>
+  <button data-filter="open" aria-pressed="false">Not approved</button>
+  <button data-filter="approved" aria-pressed="false">Approved</button>
+</div>
+
+<p id="error" class="error" hidden></p>
+<main id="view"></main>
+
+<footer>
+  <kbd>j</kbd> <kbd>k</kbd> move · <kbd>e</kbd> edit · <kbd>a</kbd> approve · <kbd>Esc</kbd> leave the text box
+</footer>
+
+<script>
+const PARAMS = new URLSearchParams(location.search);
+// No project selected means the home screen. There is no default project: a
+// fresh install has nothing in it, and inventing one would be fixture data
+// masquerading as the user's work.
+let PROJECT_ID = PARAMS.get("project") || null;
+// Same origin by default: the FastAPI process serves this page and the API, so
+// relative URLs just work. `?api=http://localhost:8000` overrides it for the
+// case of opening this file directly while working on the frontend — that is a
+// development escape hatch, not the deployed setup, and the server needs CORS
+// enabled for it.
+const API = (PARAMS.get("api") || "").replace(/\/$/, "");
+
+const ORIGIN_WORDS = {
+  machine_translation: "machine translation", translation_memory: "translation memory",
+  glossary: "glossary rule", manual: "written by hand", rule: "sound-effect rule" };
+
+let state = { data: null, tab: "review", filter: "all", focus: 0, diagnostics: false,
+              projects: null, health: null, screen: "projects" };
+
+async function load() {
+  const view = document.getElementById("view");
+  request("/api/health").then(health => { state.health = health; renderChrome(); }).catch(() => {});
+  if (!PROJECT_ID) { await loadProjects(); return; }
+  state.screen = "project";
+  view.innerHTML = `<div class="empty"><h2>Loading</h2><p>Running the translation pipeline.</p></div>`;
+  try {
+    const res = await fetch(`${API}/api/projects/${PROJECT_ID}/segments`);
+    if (!res.ok) throw new Error(`${res.status} ${res.statusText}`);
+    const payload = await res.json();
+    state.data = {
+      project: payload.project.name,
+      default_source_language: payload.project.default_source_language,
+      target_language: payload.project.target_language,
+      segments: payload.segments,
+    };
+  } catch (error) {
+    view.innerHTML = `<div class="empty"><h2>Can't reach the backend</h2>
+      <p>${esc(error.message)}. Start it with <code>python -m scanlate</code>.</p>
+      <button class="quiet" data-home="retry">Try again</button></div>`;
+    return;
+  }
+  state.data.segments.forEach(s => { s._original = s.candidate; s._pending = null; });
+  render();
+}
+
+// Every mutation returns the re-run SegmentView, so the server stays the source
+// of truth rather than the browser guessing what changed.
+async function request(url, method = "GET", body) {
+  const res = await fetch(`${API}${url}`, {
+    method, headers: { "Content-Type": "application/json" },
+    body: body === undefined ? undefined : JSON.stringify(body) });
+  if (!res.ok) {
+    const detail = await res.json().catch(() => ({}));
+    throw new Error(detail.detail || `${res.status} ${res.statusText}`);
+  }
+  return res.json();
+}
+
+const apply = (segmentId, path, body, method = "POST") =>
+  request(`/api/segments/${segmentId}${path}`, method, body);
+
+function merge(updated, extra = {}) {
+  if (!state.data) return;
+  const index = state.data.segments.findIndex(s => s.id === updated.id);
+  if (index < 0) return;
+  const previous = state.data.segments[index] || {};
+  state.data.segments[index] = Object.assign(updated, {
+    _original: previous._original ?? updated.candidate, _pending: null }, extra);
+  render();
+}
+
+function fail(error) {
+  const banner = document.getElementById("error");
+  banner.textContent = error.message;
+  banner.hidden = false;
+  setTimeout(() => { banner.hidden = true; }, 6000);
+}
+
+const esc = s => String(s).replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+
+// Render the source by splitting it at annotation boundaries, so overlapping,
+// nested and repeated ranges all survive.
+function renderSource(seg) {
+  const anns = (seg.annotations || []).filter(a => state.diagnostics || a.type !== "entity");
+  const cuts = new Set([0, seg.source.length]);
+  anns.forEach(a => { cuts.add(a.start); cuts.add(a.end); });
+  const points = [...cuts].sort((a, b) => a - b);
+  let out = "";
+  for (let i = 0; i < points.length - 1; i++) {
+    const s = points[i], e = points[i + 1];
+    const text = esc(seg.source.slice(s, e));
+    const covering = anns.filter(a => a.start <= s && a.end >= e);
+    if (!covering.length) { out += text; continue; }
+    const cls = [...new Set(covering.flatMap(a => [a.type, a.locked ? "locked" : null]))].filter(Boolean).join(" ");
+    const title = covering.map(a => a.target ? a.target + (a.locked ? " (locked)" : "") : a.label || a.type).join(" · ");
+    out += `<mark class="${cls}" title="${esc(title)}">${text}</mark>`;
+  }
+  return out;
+}
+
+const isApproved = s => s.status === "approved";
+const openWarnings = s => s.warnings || [];       // the server already filtered resolved ones
+const isFlagged = s => s.needs_review;
+
+// Confidence decides whether to interrupt, not what number to print.
+function confidenceBand(v) {
+  if (v == null) return "high";
+  return v >= 0.8 ? "high" : v >= 0.55 ? "moderate" : "low";
+}
+
+function signals(seg) {
+  const out = [];
+  const reg = seg.features.register;
+  if (reg && reg !== "neutral") out.push({ text: reg, cls: "" });
+  if (seg.features.sfx_category) out.push({ text: seg.features.sfx_category, cls: "soft" });
+  if ((seg.annotations || []).some(a => a.type === "ambiguity")) out.push({ text: "ambiguous", cls: "term" });
+  if ((seg.annotations || []).some(a => a.type === "term" && a.locked)) out.push({ text: "locked term", cls: "soft" });
+  if (seg.origin === "translation_memory") out.push({ text: "from memory", cls: "soft" });
+  if (seg.origin === "glossary") out.push({ text: "glossary applied", cls: "soft" });
+  return out;
+}
+
+function diagnosticsHTML(seg) {
+  const rows = Object.entries(seg.features).map(([k, v]) =>
+    `<dt>${esc(k.replace(/_/g, " "))}</dt><dd>${esc(typeof v === "number" && v <= 1 ? Math.round(v * 100) + "%" : v)}</dd>`);
+  rows.push(`<dt>origin</dt><dd>${esc(ORIGIN_WORDS[seg.origin] || seg.origin)}</dd>`);
+  rows.push(`<dt>locked</dt><dd>${seg.locked ? "yes" : "no"}</dd>`);
+  rows.push(`<dt>segment</dt><dd>${esc(seg.id)}</dd>`);
+  return `<details class="diagnostics"><summary>Linguistic details</summary><dl>${rows.join("")}</dl></details>`;
+}
+
+function segmentHTML(seg, index) {
+  const band = confidenceBand(seg.features.register_confidence);
+  const chips = signals(seg).map(s => `<span class="signal ${s.cls}">${esc(s.text)}</span>`).join("");
+  const uncertain = band !== "high" && !isApproved(seg)
+    ? `<span class="uncertain">${band === "low" ? "reading unclear" : "reading uncertain"}</span>` : "";
+
+  const warnings = openWarnings(seg).map(w => `
+    <li data-sev="${esc(w.severity)}">
+      <div class="line"><span class="dot"></span>
+        <span>${esc(w.message)} <span class="code">${esc(w.code)}</span></span></div>
+      ${(w.actions || []).length ? `<div class="offer">${w.actions.map(a =>
+        `<button class="quiet" data-act="warn" data-code="${esc(w.code)}"
+          data-fingerprint="${esc(w.fingerprint)}" data-kind="${esc(a.kind)}"
+          data-value="${esc(a.value || "")}">${esc(a.label)}</button>`).join("")}</div>` : ""}
+    </li>`).join("");
+
+  const alts = (seg.alternatives || []).length ? `
+    <details class="alts" ${seg._openAlts ? "open" : ""}>
+      <summary>${seg.alternatives.length} alternative${seg.alternatives.length > 1 ? "s" : ""}</summary>
+      <ul>${seg.alternatives.map((a, i) => `<li>
+        <span>${esc(a.text)}</span>${a.note ? `<span class="note">${esc(a.note)}</span>` : ""}
+        <button class="quiet" data-act="use-alt" data-index="${i}">Use this</button></li>`).join("")}</ul>
+    </details>` : "";
+
+  const learn = seg._pending ? `
+    <div class="learn">
+      <p>${esc(seg._pending.reason || "")} Remember ${esc(seg._pending.source_term)} →
+         ${esc(seg._pending.target_term)} for this project?</p>
+      <span class="offer">
+        <button class="primary" data-act="remember">Remember</button>
+        <button class="quiet" data-act="just-once">Just this once</button>
+      </span>
+    </div>` : "";
+
+  return `
+  <article class="seg" data-id="${esc(seg.id)}" data-status="${esc(seg.status)}"
+           data-flagged="${isFlagged(seg)}" data-focused="${index === state.focus}">
+    <div class="gutter">${seg.order}<span class="mark">${isApproved(seg) ? "✓" : (isFlagged(seg) ? "✎" : "·")}</span></div>
+    <div class="body">
+      <div class="kind">${esc(seg.kind)}${seg.language && seg.language !== (state.data || {}).default_source_language
+        ? `<span class="lang">${esc(seg.language)}</span>` : ""}</div>
+      <p class="source">${renderSource(seg)}</p>
+      <textarea rows="1" aria-label="Translation for segment ${seg.order}">${esc(seg.candidate)}</textarea>
+      <div class="meta">${chips}${uncertain}</div>
+      ${alts}
+      ${warnings ? `<ul class="warn">${warnings}</ul>` : ""}
+      ${state.diagnostics ? diagnosticsHTML(seg) : ""}
+      ${learn}
+      <div class="actions">
+        ${isApproved(seg)
+          ? `<span class="state">Approved</span><button class="quiet" data-act="reopen">Reopen</button>`
+          : `<button class="primary" data-act="approve">Approve</button>
+             ${seg.candidate !== seg._original ? `<button class="quiet" data-act="reset">Reset translation</button>` : ""}`}
+      </div>
+    </div>
+  </article>`;
+}
+
+function visible() {
+  const segs = state.data ? state.data.segments : [];
+  if (state.filter === "flagged") return segs.filter(isFlagged);
+  if (state.filter === "approved") return segs.filter(isApproved);
+  if (state.filter === "open") return segs.filter(s => !isApproved(s));
+  return segs;
+}
+
+const EMPTY = {
+  glossary: ["Glossary", "Names, titles, techniques and relationship terms live here with their approved renderings and lock state. Approving a term in Review adds it."],
+  memory: ["Translation memory", "Approved lines are stored here with their source and target language, so repeated dialogue fills itself in across chapters."]
+};
+
+function render() {
+  renderChrome();
+  const view = document.getElementById("view");
+  if (state.screen === "projects") { renderProjects(view); return; }
+  const d = state.data;
+  // Every handler routes through here, so this is the one place that has to
+  // know data might not have arrived (or may never arrive).
+  if (!d) return;
+  document.getElementById("project").textContent = d.project;
+  document.getElementById("pair").textContent = `${d.default_source_language} → ${d.target_language}`;
+  document.getElementById("c-total").textContent = d.segments.length;
+  document.getElementById("c-flagged").textContent = d.segments.filter(isFlagged).length;
+  document.getElementById("c-approved").textContent = d.segments.filter(isApproved).length;
+  document.getElementById("filters").style.display = state.tab === "review" ? "" : "none";
+  view.classList.toggle("wide", state.tab === "page");
+
+  if (state.tab === "page") {
+    renderPage(view);
+  } else if (state.tab === "review") {
+    const segs = visible();
+    state.focus = Math.min(state.focus, Math.max(0, segs.length - 1));
+    if (segs.length) {
+      view.innerHTML = segs.map(segmentHTML).join("");
+    } else if (!d.segments.length) {
+      view.innerHTML = emptyState("No segments yet",
+        "This project has no text to work on. Import a chapter to get started.");
+    } else {
+      view.innerHTML = emptyState("Nothing under this filter",
+        "Every segment here has been handled.",
+        `<button class="quiet" data-act="all">Show all segments</button>`);
+    }
+  } else {
+    const [title, body] = EMPTY[state.tab];
+    view.innerHTML = emptyState(title, body);
+  }
+  view.querySelectorAll("textarea").forEach(grow);
+}
+
+
+
+// ---------------------------------------------------------------------
+// Projects home. A fresh install lands here with nothing in it.
+// ---------------------------------------------------------------------
+const SOURCE_LANGUAGES = [["ja", "Japanese"], ["ko", "Korean"], ["zh", "Chinese"]];
+const TARGET_LANGUAGES = [["en", "English"]];
+
+async function loadProjects() {
+  state.screen = "projects";
+  try {
+    state.projects = await request("/api/projects");
+  } catch (error) {
+    state.projects = [];
+    fail(error);
+  }
+  render();
+}
+
+
+// Header chrome: which project, and what is actually doing the translating.
+function renderChrome() {
+  const onHome = state.screen === "projects";
+  document.getElementById("home-link").hidden = onHome;
+  document.getElementById("project").textContent =
+    onHome ? "Scanlate" : (state.data ? state.data.project : "Loading");
+  document.getElementById("pair").textContent =
+    onHome || !state.data ? "" : `${state.data.default_source_language} → ${state.data.target_language}`;
+  document.getElementById("filters").style.display =
+    !onHome && state.tab === "review" ? "" : "none";
+  document.querySelector("nav").hidden = onHome;
+  document.querySelector(".counts").hidden = onHome;
+
+  const chip = document.getElementById("backend");
+  const health = state.health;
+  if (!health) { chip.hidden = true; return; }
+  chip.hidden = false;
+  const translation = health.translation || {};
+  const ocr = health.ocr || {};
+  const dev = translation.development;
+  chip.textContent = dev
+    ? `translation: ${(translation.names || []).join(", ")} (development)`
+    : `translation: ${(translation.names || []).join(", ")}`;
+  chip.dataset.level = dev ? "warn" : "ok";
+  chip.title = dev
+    ? "No machine-translation model is loaded. The deterministic development "
+      + "backend only covers fixture phrases — install the MT model for real translation."
+    : `OCR: ${ocr.name}${(ocr.routing && ocr.routing.preferred && ocr.routing.preferred.ja
+        && ocr.routing.preferred.ja.available) ? " (manga-ocr for Japanese)" : ""}`;
+}
+
+function renderProjects(view) {
+  const projects = state.projects || [];
+  view.innerHTML = `
+    <div class="home">
+      <section class="card">
+        <h2>New project</h2>
+        <div class="field"><label for="np-name">Name</label>
+          <input id="np-name" placeholder="e.g. Yomogi Diaries vol. 1" autocomplete="off"></div>
+        <div class="field"><label for="np-source">Source language</label>
+          <select id="np-source">${SOURCE_LANGUAGES.map(([c, l]) =>
+            `<option value="${c}">${l}</option>`).join("")}</select></div>
+        <div class="field"><label for="np-target">Target language</label>
+          <select id="np-target">${TARGET_LANGUAGES.map(([c, l]) =>
+            `<option value="${c}">${l}</option>`).join("")}</select></div>
+        <div class="rowbtns"><button class="primary" data-home="create">Create project</button></div>
+        <p class="hint">The source language is only a default — each region keeps its own,
+           so a page can mix Japanese dialogue with a Korean sign.</p>
+      </section>
+
+      <section class="card">
+        <h2>Existing projects</h2>
+        ${projects.length ? `<ul class="project-list">${projects.map(p => `
+          <li><button class="project" data-open="${esc(p.id)}">
+            <span class="name">${esc(p.name)}</span>
+            <span class="meta">${esc(p.default_source_language)} → ${esc(p.target_language)}
+              · ${p.chapters.length} chapter${p.chapters.length === 1 ? "" : "s"}
+              · ${p.pages.length} page${p.pages.length === 1 ? "" : "s"}
+              · ${p.segment_count} segment${p.segment_count === 1 ? "" : "s"}</span>
+          </button></li>`).join("")}</ul>`
+        : `<p class="hint">No projects yet. Create one to start.</p>`}
+      </section>
+    </div>`;
+}
+
+async function createProject() {
+  const name = document.getElementById("np-name").value.trim();
+  if (!name) { fail(new Error("A project needs a name.")); return; }
+  try {
+    const project = await request("/api/projects", "POST", {
+      name,
+      default_source_language: document.getElementById("np-source").value,
+      target_language: document.getElementById("np-target").value,
+    });
+    await openProject(project.id);
+  } catch (error) { fail(error); }
+}
+
+async function openProject(projectId) {
+  PROJECT_ID = projectId;
+  history.replaceState(null, "", `?project=${encodeURIComponent(projectId)}`);
+  state.screen = "project";
+  state.data = null;
+  state.tab = "page";
+  page.id = null; page.list = null; page.data = null; page.selected = null;
+  await load();
+}
+
+function goHome() {
+  PROJECT_ID = null;
+  history.replaceState(null, "", location.pathname);
+  state.data = null;
+  loadProjects();
+}
+
+document.addEventListener("click", e => {
+  const open = e.target.closest("[data-open]");
+  if (open) { openProject(open.dataset.open); return; }
+  const action = e.target.closest("[data-home]")?.dataset.home;
+  if (action === "create") createProject();
+  if (action === "retry") load();
+  if (action === "home") goHome();
+});
+
+document.addEventListener("keydown", e => {
+  if (state.screen === "projects" && e.key === "Enter" && e.target.id === "np-name") {
+    createProject();
+  }
+});
+
+// ---------------------------------------------------------------------
+// Page workspace.
+//
+// Image coordinates are the only ones that persist. `page.scale` exists
+// purely to draw: every region is stored in image space and multiplied on the
+// way to the screen, divided on the way back. Nothing viewport-shaped is ever
+// sent to the server.
+// ---------------------------------------------------------------------
+const page = { id: null, data: null, scale: 1, fit: true, selected: null, mode: "select",
+               busy: false, note: null, chapterId: null, chapters: [], pendingSource: null };
+
+const KINDS = ["dialogue", "thought", "narration", "sfx", "sign", "other"];
+const LANGUAGES = [["", "auto"], ["ja", "Japanese"], ["ko", "Korean"], ["en", "English"]];
+
+const safeScale = () => (page.scale > 0 ? page.scale : 1);
+const toImage = v => Math.round(v / safeScale());
+const toScreen = v => Math.round(v * safeScale());
+
+async function loadPages() {
+  try {
+    const [project, list] = await Promise.all([
+      request(`/api/projects/${PROJECT_ID}`),
+      request(`/api/projects/${PROJECT_ID}/pages`),
+    ]);
+    page.chapters = project.chapters || [];
+    page.list = Array.isArray(list) ? list : [];
+    // A page belongs to a chapter, so the workspace works inside one rather
+    // than treating the project as a flat pile of images.
+    if (!page.chapterId || !page.chapters.some(c => c.id === page.chapterId)) {
+      page.chapterId = (page.chapters[0] && page.chapters[0].id) || null;
+    }
+    const visible = chapterPages();
+    if (!page.id || !visible.some(p => p.id === page.id)) {
+      page.id = visible.length ? visible[0].id : null;
+    }
+    page.data = page.id ? await request(`/api/pages/${page.id}`) : null;
+  } catch (error) {
+    page.list = page.list || [];
+    page.data = null;
+    fail(error);
+  }
+}
+
+function chapterPages() {
+  return (page.list || []).filter(p => !page.chapterId || p.chapter_id === page.chapterId);
+}
+
+function renderPage(view) {
+  if (!page.list) {
+    view.innerHTML = emptyState("Loading pages", "Fetching this project's pages.");
+    loadPages().then(render);
+    return;
+  }
+  let selected = page.selected ? state.data.segments.find(s => s.id === page.selected) : null;
+  if (!selected && page.selected) page.selected = null;
+  view.innerHTML = `
+    <div class="page-wrap">
+      <div class="stage">
+        <div class="stage-bar">
+          <span class="tools">
+            <button class="tool" data-page="tool-select" aria-pressed="${page.mode === "select"}"
+              title="Select and move regions">Select</button>
+            <button class="tool" data-page="tool-draw" aria-pressed="${page.mode === "draw"}"
+              title="Drag on the page to add a region (Esc cancels)">Add region</button>
+          </span>
+          <span class="divider"></span>
+          <button class="quiet" data-page="detect" ${page.busy || !page.data ? "disabled" : ""}
+            title="Find text automatically, then delete anything it got wrong">Detect</button>
+          <button class="quiet" data-page="ocr-page" ${page.busy || !page.data ? "disabled" : ""}
+            title="Read every empty region">OCR page</button>
+          <span class="divider"></span>
+          <select id="chapter-picker" title="Chapter">
+            ${page.chapters.map(c => `<option value="${esc(c.id)}"
+              ${c.id === page.chapterId ? "selected" : ""}>Ch. ${c.number}${
+                c.title ? " · " + esc(c.title) : ""}</option>`).join("")}
+            ${page.chapters.length ? "" : `<option value="">No chapters yet</option>`}
+          </select>
+          <button class="quiet" data-page="new-chapter" title="Create a chapter">+ Chapter</button>
+          ${chapterPages().length ? `<select id="page-picker" title="Page">${chapterPages().map(p =>
+            `<option value="${esc(p.id)}" ${p.id === page.id ? "selected" : ""}>Page ${p.number}</option>`
+          ).join("")}</select>` : ""}
+          <button class="quiet" data-page="import" ${page.chapters.length ? "" : "disabled"}
+            title="${page.chapters.length ? "Import a page into this chapter"
+                                          : "Create a chapter first"}">Import page…</button>
+          <input type="file" id="page-file" accept="image/png,image/jpeg,image/webp" hidden>
+          <span class="spacer"></span>
+          ${page.data ? `
+            <button class="quiet" data-page="zoom-out" title="Zoom out">−</button>
+            <span class="zoom">${Math.round(page.scale * 100)}%</span>
+            <button class="quiet" data-page="zoom-in" title="Zoom in">+</button>
+            <button class="quiet" data-page="fit">Fit</button>` : ""}
+        </div>
+        ${page.busy ? `<div class="working">Working…</div>` : ""}
+        <div class="canvas-scroll" id="canvas-scroll">${stageHTML()}</div>
+      </div>
+      <div class="panel">${panelHTML(selected)}</div>
+    </div>`;
+  if (page.data) fitIfNeeded();
+  view.querySelectorAll("textarea").forEach(grow);
+}
+
+function stageHTML() {
+  if (!page.data) {
+    return page.chapters.length
+      ? `<div class="empty"><h2>No pages in this chapter</h2>
+          <p>Import a PNG, JPEG or WebP page to start working on it.</p></div>`
+      : `<div class="empty"><h2>No chapters yet</h2>
+          <p>Create a chapter, then import pages into it.</p></div>`;
+  }
+  const w = toScreen(page.data.width), h = toScreen(page.data.height);
+  const regions = (page.data.regions || []).map((r, index) => {
+    const box = r.region;
+    const empty = !(r.source_text || "").trim();
+    const selected = r.segment_id === page.selected;
+    // Labels and handles only on the region being worked on. Everything else
+    // stays a thin outline so the artwork is still readable.
+    return `<div class="region" data-segment="${esc(r.segment_id)}"
+        data-status="${esc(r.status)}" data-empty="${empty}" data-selected="${selected}"
+        title="${esc(r.source_text || "No text yet")}"
+        style="left:${toScreen(box.x)}px; top:${toScreen(box.y)}px;
+               width:${toScreen(box.width)}px; height:${toScreen(box.height)}px">
+        <span class="tag">${index + 1}${esc(r.kind === "dialogue" ? "" : " · " + r.kind)}</span>
+        ${selected ? `<button class="reject" data-page="delete-region"
+            title="Delete this region (Del)">×</button>
+          <span class="handle" data-resize="${esc(r.segment_id)}"></span>` : ""}
+      </div>`;
+  }).join("");
+  return `<div class="canvas-stage ${page.mode === "draw" ? "drawmode" : ""}" id="stage"
+      style="width:${w}px; height:${h}px">
+      <img src="${API}/api/pages/${esc(page.data.id)}/image" alt="Page ${page.data.number}" draggable="false">
+      ${regions}
+    </div>`;
+}
+
+function panelHTML(segment) {
+  if (!page.data) return "";
+  if (!segment) {
+    return `<div class="card"><h3>Nothing selected</h3>
+      <p class="hint">Click a region to work on it, or choose <strong>Add region</strong>
+      and drag on the page. Detection and OCR are both optional — you can always
+      type the source text yourself.</p>
+      ${page.note ? noteHTML(page.note) : ""}</div>`;
+  }
+  const regions = page.data.regions || [];
+  const index = regions.findIndex(r => r.segment_id === segment.id);
+  const region = regions[index];
+
+  return `
+    <div class="card">
+      <div class="panel-head">
+        <h3>Region ${index + 1} of ${regions.length}</h3>
+        <span class="navbtns">
+          <button class="quiet" data-page="prev" ${index <= 0 ? "disabled" : ""}
+            title="Previous region (k)">‹ Prev</button>
+          <button class="quiet" data-page="next" ${index >= regions.length - 1 ? "disabled" : ""}
+            title="Next region (j)">Next ›</button>
+        </span>
+      </div>
+
+      <label class="label" for="f-source">Source</label>
+      <textarea id="f-source" class="source-edit" rows="2"
+        placeholder="Run OCR, or type the source text here">${esc(segment.source)}</textarea>
+      <div class="rowbtns">
+        <button class="quiet" data-page="ocr-one" ${page.busy ? "disabled" : ""}>Run OCR</button>
+        <button class="quiet" data-page="save-source">Save source</button>
+        <button class="quiet danger" data-page="delete-region" title="Delete region (Del)">Delete</button>
+      </div>
+      ${page.note ? noteHTML(page.note) : ""}
+
+      <label class="label">Translation</label>
+      ${translationHTML(segment)}
+
+      <details class="region-settings" ${page.settingsOpen ? "open" : ""}>
+        <summary>Region settings</summary>
+        <div class="field"><label for="f-kind">Type</label>
+          <select id="f-kind" data-field="kind">${KINDS.map(k =>
+            `<option value="${k}" ${k === segment.kind ? "selected" : ""}>${k}</option>`).join("")}</select></div>
+        <div class="field"><label for="f-lang">Language</label>
+          <select id="f-lang" data-field="language">${LANGUAGES.map(([code, label]) =>
+            `<option value="${code}" ${code === (segment.language || "") ? "selected" : ""}>${label}</option>`
+          ).join("")}</select></div>
+        <div class="field"><label for="f-orient">Text runs</label>
+          <select id="f-orient" data-field="orientation">
+            <option value="horizontal" ${region && region.region.orientation === "horizontal" ? "selected" : ""}>horizontally</option>
+            <option value="vertical_rl" ${region && region.region.orientation === "vertical_rl" ? "selected" : ""}>vertically</option>
+          </select></div>
+      </details>
+    </div>`;
+}
+
+// The translation half of the panel: the candidate, anything genuinely wrong
+// with it, and Approve. Linguistic detail stays behind Diagnostics.
+function translationHTML(segment) {
+  const approved = segment.status === "approved";
+  const warnings = (segment.warnings || []).filter(w =>
+    state.diagnostics || w.severity !== "INFO");
+  return `
+    <div class="translation">
+      <textarea id="f-translation" rows="2"
+        placeholder="No translation candidate yet">${esc(segment.candidate)}</textarea>
+      ${warnings.length ? `<ul class="warn">${warnings.map(w => `
+        <li data-sev="${esc(w.severity)}">
+          <div class="line"><span class="dot"></span><span>${esc(w.message)}</span></div>
+          ${(w.actions || []).length ? `<div class="offer">${w.actions.map(a =>
+            `<button class="quiet" data-act="warn" data-code="${esc(w.code)}"
+              data-fingerprint="${esc(w.fingerprint)}" data-kind="${esc(a.kind)}"
+              data-value="${esc(a.value || "")}">${esc(a.label)}</button>`).join("")}</div>` : ""}
+        </li>`).join("")}</ul>` : ""}
+      ${(segment.alternatives || []).length ? `
+        <details class="alts"><summary>${segment.alternatives.length} alternative${
+          segment.alternatives.length > 1 ? "s" : ""}</summary>
+          <ul>${segment.alternatives.map((a, i) => `<li><span>${esc(a.text)}</span>
+            ${a.note ? `<span class="note">${esc(a.note)}</span>` : ""}
+            <button class="quiet" data-act="use-alt" data-index="${i}">Use this</button></li>`).join("")}</ul>
+        </details>` : ""}
+      ${state.diagnostics ? diagnosticsHTML(segment) : ""}
+      <div class="actions">
+        ${approved
+          ? `<span class="state">Approved</span>
+             <button class="quiet" data-act="reopen">Reopen</button>`
+          : `<button class="primary" data-act="approve">Approve</button>`}
+        <button class="quiet" data-page="next">Next region ›</button>
+      </div>
+    </div>`;
+}
+
+function noteHTML(note) {
+  return `<p class="ocr-note" data-level="${note.level}">${esc(note.text)}</p>`;
+}
+
+function fitIfNeeded() {
+  const scroll = document.getElementById("canvas-scroll");
+  if (!scroll || !page.fit || !page.data || !page.data.width) return;
+  // clientWidth is 0 before the element is laid out (and while the tab is
+  // hidden). Fitting to that would produce a zero or negative scale and every
+  // region coordinate computed from it would be nonsense, so keep the current
+  // scale until there is a real width to fit to.
+  const available = scroll.clientWidth - 28;
+  if (available <= 0) return;
+  const scale = Math.max(0.05, Math.min(1, available / page.data.width));
+  if (Math.abs(scale - page.scale) > 0.01) { page.scale = scale; render(); }
+}
+
+async function refreshPage(reselect = true) {
+  page.data = await request(`/api/pages/${page.id}`);
+  const payload = await request(`/api/projects/${PROJECT_ID}/segments`);
+  state.data.segments = payload.segments.map(s => Object.assign(s, { _original: s.candidate }));
+  if (reselect && page.selected && !state.data.segments.some(s => s.id === page.selected)) {
+    page.selected = null;
+  }
+  render();
+}
+
+// Moving between bubbles is the main loop, so it has buttons and keys.
+function stepRegion(delta) {
+  const regions = (page.data && page.data.regions) || [];
+  if (!regions.length) return;
+  const current = regions.findIndex(r => r.segment_id === page.selected);
+  const next = regions[Math.max(0, Math.min(regions.length - 1, current + delta))];
+  if (next) selectSegment(next.segment_id);
+}
+
+function selectSegment(segmentId) {
+  page.selected = segmentId;
+  page.note = null;
+  const index = state.data.segments.findIndex(s => s.id === segmentId);
+  if (index >= 0) state.focus = index;
+  render();
+}
+
+async function pageAction(action, element) {
+  if (!page.list) return;
+  if (element) element.disabled = true;
+  const selected = page.selected;
+  try {
+    if (action === "import") { document.getElementById("page-file").click(); return; }
+    if (action === "new-chapter") {
+      const numbers = page.chapters.map(c => c.number);
+      const next = numbers.length ? Math.max(...numbers) + 1 : 1;
+      const title = prompt(`Title for chapter ${next} (optional)`, "");
+      if (title === null) return;
+      const chapter = await request(`/api/projects/${PROJECT_ID}/chapters`, "POST",
+                                    { number: next, title: title || null });
+      page.chapterId = chapter.id; page.id = null; page.list = null;
+      await loadPages();
+      render();
+      return;
+    }
+    if (action === "zoom-in") { page.fit = false; page.scale = Math.min(4, page.scale * 1.25); render(); return; }
+    if (action === "zoom-out") { page.fit = false; page.scale = Math.max(0.1, page.scale / 1.25); render(); return; }
+    if (action === "fit") { page.fit = true; render(); return; }
+    if (action === "tool-select") { page.mode = "select"; render(); return; }
+    if (action === "tool-draw") { page.mode = "draw"; render(); return; }
+    if (action === "prev" || action === "next") { stepRegion(action === "next" ? 1 : -1); return; }
+
+    if (action === "detect") {
+      page.busy = true; render();
+      const result = await request(`/api/pages/${page.id}/detect`, "POST");
+      page.note = { level: result.available && result.created ? "info" : "warn",
+                    text: result.created
+                      ? `Found ${result.created} region${result.created === 1 ? "" : "s"}.`
+                      : (result.message || "Nothing found.") };
+      await refreshPage();
+      return;
+    }
+    if (action === "ocr-page") {
+      page.busy = true; render();
+      const result = await request(`/api/pages/${page.id}/ocr`, "POST");
+      const failed = result.results.filter(r => !r.ok).length;
+      const shaky = result.results.filter(r => r.low_confidence).length;
+      const unscored = result.results.filter(r => r.ok && r.confidence_available === false).length;
+      page.note = { level: failed || shaky ? "warn" : "info",
+        text: result.results.length
+          ? `OCR ran on ${result.results.length} region(s)`
+            + (shaky ? `, ${shaky} low confidence` : "")
+            + (unscored ? `, ${unscored} from an engine with no confidence score` : "")
+            + (failed ? `, ${failed} failed — type those in by hand` : "") + "."
+          : "No empty regions to read." };
+      await refreshPage();
+      return;
+    }
+    if (!selected) return;
+
+    if (action === "ocr-one") {
+      page.busy = true; render();
+      const result = await request(`/api/segments/${selected}/ocr`, "POST");
+      const r = result.result;
+      page.note = { level: r.ok ? (r.needs_review ? "warn" : "info") : "warn",
+        text: r.ok ? ocrSummary(r) : `${r.error} You can type the source text instead.` };
+      await refreshPage();
+      return;
+    }
+    if (action === "save-source") {
+      const text = document.getElementById("f-source")?.value ?? page.pendingSource ?? "";
+      page.pendingSource = null;
+      const language = document.getElementById("f-lang").value || null;
+      const result = await request(`/api/segments/${selected}/source`, "PATCH",
+                                   { source_text: text, language });
+      page.note = result.reopened ? { level: "warn", text: result.message } : null;
+      await refreshPage();
+      return;
+    }
+    if (action === "delete-region") {
+      let result = await fetch(`${API}/api/segments/${selected}/region`, { method: "DELETE" });
+      if (result.status === 409) {
+        const detail = (await result.json().catch(() => ({}))).detail || "";
+        if (!confirm(`${detail}\n\nDetach it from the page and keep the translation?`)) return;
+        result = await fetch(`${API}/api/segments/${selected}/region?force=true`,
+                             { method: "DELETE" });
+      }
+      if (!result.ok) throw new Error(`${result.status} ${result.statusText}`);
+      page.selected = null;
+      await refreshPage(false);
+      return;
+    }
+  } catch (error) {
+    fail(error);
+  } finally {
+    page.busy = false;
+    if (element) element.disabled = false;
+    if (["detect", "ocr-page", "ocr-one"].includes(action)) render();
+  }
+}
+
+// The Page panel's two boxes are different things and save differently.
+//
+// The translation saves on blur, like Review. The source does not: changing it
+// discards the translation and reruns the pipeline, which is too much to do
+// while someone is still correcting OCR mid-word — it saves on "Save source",
+// or on blur once the text has actually settled.
+async function savePageField(element) {
+  const segmentId = page.selected;
+  if (!segmentId || !state.data) return;
+  const segment = state.data.segments.find(s => s.id === segmentId);
+  if (!segment) return;
+  const value = element.value;
+
+  try {
+    if (element.id === "f-translation") {
+      if (value === segment.candidate) return;
+      merge(await apply(segmentId, "", { translation: value }, "PATCH"));
+      return;
+    }
+    if (value === segment.source) return;
+    page.pendingSource = value;          // "Save source" applies it explicitly
+  } catch (error) { fail(error); }
+}
+
+// Absence of a score is a fact about the engine, not a good score.
+function ocrSummary(result) {
+  const engine = result.backend ? `${result.backend} read this` : "Read";
+  const score = result.confidence_available === false
+    ? "no confidence score for this engine"
+    : (result.confidence != null
+        ? `${Math.round(result.confidence * 100)}% confidence`
+        : "no confidence score");
+  const parts = [`${engine} — ${score}`];
+  if (result.fell_back_from) {
+    parts.push(`${result.fell_back_from} was unavailable, so ${result.backend} was used instead`);
+  }
+  if (result.low_confidence) parts.push("check it carefully");
+  if (result.reopened) parts.push("the approved translation was released for review");
+  return parts.join(". ") + ".";
+}
+
+async function updateRegionField(field, value) {
+  if (!page.selected) return;
+  try {
+    const body = {};
+    body[field] = field === "language" ? (value || null) : value;
+    await request(`/api/segments/${page.selected}/region`, "PATCH", body);
+    await refreshPage();
+  } catch (error) { fail(error); }
+}
+
+async function importPageFile(file) {
+  try {
+    // Into the chapter the user is looking at — never guessed, never invented.
+    const chapterId = page.chapterId;
+    if (!chapterId) { fail(new Error("Create a chapter before importing pages.")); return; }
+    const numbers = chapterPages().map(p => p.number);
+    const form = new FormData();
+    form.append("file", file);
+    form.append("chapter_id", chapterId);
+    form.append("number", String(numbers.length ? Math.max(...numbers) + 1 : 1));
+    const res = await fetch(`${API}/api/projects/${PROJECT_ID}/pages`,
+                            { method: "POST", body: form });
+    if (!res.ok) throw new Error(((await res.json().catch(() => ({}))).detail) || res.statusText);
+    const imported = await res.json();
+    page.id = imported.id; page.fit = true; page.selected = null; page.list = null;
+    page.chapterId = chapterId;
+    await loadPages();
+    await refreshPage(false);
+  } catch (error) { fail(error); }
+}
+
+// --- pointer interaction: draw, move, resize --------------------------
+let drag = null;
+
+document.addEventListener("mousedown", e => {
+  if (state.tab !== "page" || !page.data) return;
+  const stage = document.getElementById("stage");
+  if (!stage || !stage.contains(e.target)) return;
+  const rect = stage.getBoundingClientRect();
+  const at = { x: toImage(e.clientX - rect.left), y: toImage(e.clientY - rect.top) };
+
+  const handle = e.target.closest("[data-resize]");
+  if (handle) {
+    const region = page.data.regions.find(r => r.segment_id === handle.dataset.resize);
+    drag = { type: "resize", id: handle.dataset.resize, box: { ...region.region }, at };
+    e.preventDefault();
+    return;
+  }
+  const box = e.target.closest(".region");
+  if (box && page.mode !== "draw") {
+    selectSegment(box.dataset.segment);
+    const region = page.data.regions.find(r => r.segment_id === box.dataset.segment);
+    drag = { type: "move", id: box.dataset.segment, box: { ...region.region }, at };
+    e.preventDefault();
+    return;
+  }
+  if (page.mode === "draw") {
+    drag = { type: "draw", start: at, at };
+    e.preventDefault();
+  }
+});
+
+document.addEventListener("mousemove", e => {
+  if (!drag) return;
+  const stage = document.getElementById("stage");
+  if (!stage) return;
+  const rect = stage.getBoundingClientRect();
+  const at = { x: toImage(e.clientX - rect.left), y: toImage(e.clientY - rect.top) };
+  drag.current = at;
+  const box = dragBox(drag, at);
+  if (!box) return;
+  const preview = drag.type === "draw"
+    ? (document.querySelector(".drawing") || stage.appendChild(Object.assign(
+        document.createElement("div"), { className: "drawing" })))
+    : stage.querySelector(`.region[data-segment="${drag.id}"]`);
+  if (!preview) return;
+  preview.style.left = toScreen(box.x) + "px";
+  preview.style.top = toScreen(box.y) + "px";
+  preview.style.width = toScreen(box.width) + "px";
+  preview.style.height = toScreen(box.height) + "px";
+});
+
+function dragBox(state_, at) {
+  if (state_.type === "draw") {
+    return { x: Math.min(state_.start.x, at.x), y: Math.min(state_.start.y, at.y),
+             width: Math.abs(at.x - state_.start.x), height: Math.abs(at.y - state_.start.y) };
+  }
+  const dx = at.x - state_.at.x, dy = at.y - state_.at.y;
+  if (state_.type === "move") {
+    return { x: Math.max(0, state_.box.x + dx), y: Math.max(0, state_.box.y + dy),
+             width: state_.box.width, height: state_.box.height };
+  }
+  return { x: state_.box.x, y: state_.box.y,
+           width: Math.max(6, state_.box.width + dx), height: Math.max(6, state_.box.height + dy) };
+}
+
+document.addEventListener("mouseup", async () => {
+  if (!drag) return;
+  const finished = drag;
+  const at = finished.current || finished.at;
+  drag = null;
+  document.querySelector(".drawing")?.remove();
+  const geometry = dragBox(finished, at);
+  if (!geometry) return;
+
+  // Clamp to the page: coordinates are image-space and must stay on the image.
+  geometry.x = Math.max(0, Math.min(geometry.x, page.data.width - 1));
+  geometry.y = Math.max(0, Math.min(geometry.y, page.data.height - 1));
+  geometry.width = Math.max(1, Math.min(geometry.width, page.data.width - geometry.x));
+  geometry.height = Math.max(1, Math.min(geometry.height, page.data.height - geometry.y));
+
+  try {
+    if (finished.type === "draw") {
+      if (geometry.width < 6 || geometry.height < 6) { render(); return; }
+      const created = await request(`/api/pages/${page.id}/regions`, "POST",
+        { ...geometry, kind: "dialogue" });
+      page.mode = "select";
+      await refreshPage(false);
+      selectSegment(created.id);
+      return;
+    }
+    const unchanged = geometry.x === finished.box.x && geometry.y === finished.box.y
+      && geometry.width === finished.box.width && geometry.height === finished.box.height;
+    if (unchanged) return;
+    await request(`/api/segments/${finished.id}/region`, "PATCH", geometry);
+    await refreshPage();
+  } catch (error) { fail(error); render(); }
+});
+
+function emptyState(title, body, action = "") {
+  return `<div class="empty"><h2>${esc(title)}</h2><p>${esc(body)}</p>${action}</div>`;
+}
+
+function grow(ta) { ta.style.height = "auto"; ta.style.height = ta.scrollHeight + "px"; }
+
+// --- 5: find() never hands back undefined silently ---------------------
+// Returns null when data hasn't loaded, so callers can guard; throws on a real
+// id mismatch, which is a bug worth seeing rather than a quiet no-op.
+function find(id) {
+  if (!state.data) return null;
+  const seg = state.data.segments.find(s => s.id === id);
+  if (!seg) throw new Error(`No segment ${id} in the loaded project`);
+  return seg;
+}
+
+document.getElementById("view").addEventListener("input", e => {
+  if (!state.data || e.target.tagName !== "TEXTAREA") return;
+  grow(e.target);
+  // Only Review's per-card translation boxes live inside a .seg card. The Page
+  // panel's own boxes are handled below; reaching for .seg here threw on them.
+  const card = e.target.closest(".seg");
+  if (!card) return;
+  const seg = find(card.dataset.id);
+  if (seg) seg.candidate = e.target.value;
+});
+
+// Persist on blur rather than on every keystroke: one save per edit, and the
+// re-run SegmentView comes back with warnings recomputed against the new text.
+document.getElementById("view").addEventListener("focusout", async e => {
+  if (!state.data || e.target.tagName !== "TEXTAREA") return;
+  if (e.target.id === "f-source" || e.target.id === "f-translation") {
+    savePageField(e.target);
+    return;
+  }
+  const card = e.target.closest(".seg");
+  if (!card) return;
+  const seg = find(card.dataset.id);
+  if (!seg || seg.candidate === seg._lastSaved || seg.candidate === e.target.defaultValue) return;
+  const pending = seg.candidate;
+  try {
+    merge(await apply(seg.id, "", { translation: pending }, "PATCH"));
+    // Only now is this value actually saved. Marking it before the request
+    // would make a failed save look done and block retrying the same text.
+    const saved = find(seg.id);
+    if (saved) saved._lastSaved = pending;
+  } catch (error) {
+    fail(error);
+  }
+});
+
+document.getElementById("view").addEventListener("click", async e => {
+  if (!state.data) return;
+  const btn = e.target.closest("button[data-act]");
+  const card = e.target.closest(".seg");
+  if (card && state.tab === "review") {
+    const cards = [...document.querySelectorAll(".seg")];
+    state.focus = Math.max(0, cards.indexOf(card));
+  }
+  if (!btn) return;
+  const act = btn.dataset.act;
+  if (act === "all") { setFilter("all"); return; }
+  const seg = find(card.dataset.id);
+  if (!seg) return;
+  btn.disabled = true;
+
+  try {
+    if (act === "approve") {
+      const payload = await apply(seg.id, "/approve", {
+        translation: seg.candidate,
+        term_resolutions: seg._resolutions || [] });
+      merge(payload.segment, { _pending: payload.suggestion, _resolutions: [] });
+      return;
+    }
+    if (act === "reopen") { merge(await apply(seg.id, "/reopen")); return; }
+    if (act === "reset") {
+      merge(await apply(seg.id, "", { translation: seg._original, status: "machine" }, "PATCH"));
+      return;
+    }
+    if (act === "use-alt") {
+      const text = seg.alternatives[+btn.dataset.index].text;
+      merge(await apply(seg.id, "", { translation: text }, "PATCH"));
+      return;
+    }
+    if (act === "warn") { await warningAction(seg, btn.dataset); return; }
+    if (act === "remember") {
+      const rule = seg._pending;
+      // Same error handling as every other mutation: a rejected glossary write
+      // must not leave the prompt looking accepted.
+      await request(`/api/projects/${PROJECT_ID}/glossary/accept`, "POST", {
+        source_language: rule.source_language, source_term: rule.source_term,
+        target_language: rule.target_language, target_term: rule.target_term,
+        category: rule.category || "relationship_term", locked: true });
+      merge(await apply(seg.id, "", {}, "PATCH"));
+      return;
+    }
+    if (act === "just-once") { seg._pending = null; render(); return; }
+  } catch (error) {
+    fail(error);
+  } finally {
+    btn.disabled = false;
+  }
+});
+
+async function warningAction(seg, data) {
+  if (data.kind === "show_alternatives") { seg._openAlts = true; render(); return; }
+  if (data.kind === "dismiss") {
+    merge(await apply(seg.id, "/issues/resolve",
+                      { fingerprint: data.fingerprint, code: data.code }));
+    return;
+  }
+  // "use" and "add_rule" carry an explicit terminology decision, which approval
+  // turns into a glossary suggestion instead of inferring one from the prose.
+  const warning = (seg.warnings || []).find(w => w.fingerprint === data.fingerprint);
+  const term = warning?.data?.source_term;
+  let text = seg.candidate;
+  if (data.value && warning?.data?.expected) {
+    text = text.replace(new RegExp(warning.data.expected, "i"), data.value);
+  } else if (data.value && term && seg.source.includes(term)) {
+    const previous = (warning?.data?.options || []).find(o => text.toLowerCase().includes(o.toLowerCase()));
+    text = previous ? text.replace(new RegExp(previous, "i"), data.value) : text;
+  }
+  const updated = await apply(seg.id, "", { translation: text }, "PATCH");
+  const resolutions = (seg._resolutions || []).filter(r => r.source_term !== term);
+  if (term && data.value) resolutions.push({ source_term: term, target_term: data.value });
+  merge(updated, { _resolutions: resolutions, _pending: null });
+  if (data.kind === "add_rule" && term && data.value) {
+    merge(Object.assign(find(seg.id), {
+      _pending: { source_term: term, target_term: data.value, category: "relationship_term",
+                  source_language: updated.language, target_language: updated.target_language }
+    }));
+  }
+}
+
+// --- page workspace controls -----------------------------------------
+document.getElementById("view").addEventListener("click", e => {
+  const btn = e.target.closest("button[data-page]");
+  if (btn && state.data) {
+    // Region buttons sit inside the overlay; don't let the click also start a drag.
+    e.stopPropagation();
+    pageAction(btn.dataset.page, btn);
+  }
+});
+
+document.getElementById("view").addEventListener("change", e => {
+  if (!state.data) return;
+  if (e.target.id === "chapter-picker") {
+    page.chapterId = e.target.value || null;
+    page.id = null; page.selected = null; page.note = null; page.list = null;
+    loadPages().then(render).catch(fail);
+    return;
+  }
+  if (e.target.id === "page-picker") {
+    page.id = e.target.value; page.selected = null; page.fit = true; page.note = null;
+    request(`/api/pages/${page.id}`).then(data => { page.data = data; render(); }).catch(fail);
+    return;
+  }
+  if (e.target.id === "page-file") {
+    const file = e.target.files && e.target.files[0];
+    if (file) importPageFile(file);
+    return;
+  }
+  const field = e.target.dataset.field;
+  if (field) updateRegionField(field, e.target.value);
+});
+
+window.addEventListener("resize", () => { if (state.tab === "page" && page.fit) fitIfNeeded(); });
+
+document.getElementById("tabs").addEventListener("click", e => {
+  const btn = e.target.closest("button[data-tab]");
+  if (!btn || !state.data) return;
+  state.tab = btn.dataset.tab;
+  document.querySelectorAll("#tabs button").forEach(b =>
+    b.setAttribute("aria-current", b.dataset.tab === state.tab ? "page" : "false"));
+  render();
+});
+
+document.getElementById("filters").addEventListener("click", e => {
+  const btn = e.target.closest("button[data-filter]");
+  if (btn && state.data) setFilter(btn.dataset.filter);
+});
+
+function setFilter(f) {
+  state.filter = f; state.focus = 0;
+  document.querySelectorAll("#filters button").forEach(b =>
+    b.setAttribute("aria-pressed", String(b.dataset.filter === f)));
+  render();
+}
+
+document.getElementById("diag-toggle").addEventListener("change", e => {
+  state.diagnostics = e.target.checked;
+  if (state.data) render();
+});
+
+document.addEventListener("keydown", e => {
+  const typing = e.target.tagName === "TEXTAREA" || e.target.tagName === "INPUT";
+  if (typing && e.key === "Escape") { e.target.blur(); return; }
+
+  // Escape backs out of drawing, then out of the selection.
+  if (e.key === "Escape" && state.tab === "page" && !typing) {
+    if (drag && drag.type === "draw") { drag = null; document.querySelector(".drawing")?.remove(); }
+    if (page.mode === "draw") { page.mode = "select"; render(); return; }
+    if (page.selected) { page.selected = null; render(); }
+    return;
+  }
+  if (typing || e.metaKey || e.ctrlKey) return;
+
+  if (state.tab === "page" && page.selected && (e.key === "Delete" || e.key === "Backspace")) {
+    e.preventDefault();
+    pageAction("delete-region", null);
+    return;
+  }
+  // Nothing below means anything without a loaded project.
+  if (!state.data || !state.data.segments.length) return;
+  if (state.tab === "glossary" || state.tab === "memory") return;
+  const onPage = state.tab === "page";
+  const span = onPage ? state.data.segments.length : document.querySelectorAll(".seg").length;
+  if (!span) return;
+  if (e.key === "j" || e.key === "k") {
+    if (onPage) { stepRegion(e.key === "j" ? 1 : -1); return; }
+    state.focus = Math.max(0, Math.min(span - 1, state.focus + (e.key === "j" ? 1 : -1)));
+    render();
+    const el = document.querySelectorAll(".seg")[onPage ? 0 : state.focus];
+    if (el) el.scrollIntoView({ block: "nearest" });
+  }
+  const card = document.querySelectorAll(".seg")[onPage ? 0 : Math.min(state.focus, span - 1)];
+  if (!card) return;
+  if (!find(card.dataset.id)) return;
+  if (e.key === "e") { e.preventDefault(); const t = card.querySelector("textarea"); if (t) t.focus(); }
+  if (e.key === "a") {
+    const seg = find(card.dataset.id);
+    const button = card.querySelector(`button[data-act="${isApproved(seg) ? "reopen" : "approve"}"]`);
+    if (button) button.click();
+  }
+});
+
+load();
+</script>
+</body>
+</html>

@@ -1,0 +1,8 @@
+[
+ {"form": "先輩", "key": "senpai", "domain": "school", "impact": 2, "note": "Senior/junior status is explicit in Japanese and invisible in English; dropping it loses the relationship.", "suggestions": ["senpai", "upperclassman"]},
+ {"form": "部活", "key": "bukatsu", "domain": "school", "impact": 1, "note": "After-school club activity; not an American-style extracurricular period.", "suggestions": ["club", "club activities"]},
+ {"form": "委員長", "key": "iinchou", "domain": "school", "impact": 1, "note": "Class representative, an elected student role.", "suggestions": ["class rep", "class president"]},
+ {"form": "お疲れ様", "key": "otsukaresama", "domain": "idiom", "impact": 2, "note": "Acknowledges shared effort on parting; has no direct English equivalent.", "suggestions": ["good work today", "thanks for your work"]},
+ {"form": "いただきます", "key": "itadakimasu", "domain": "idiom", "impact": 2, "note": "Said before eating; not a prayer and not 'bon appétit'.", "suggestions": ["itadakimasu", "let's eat", "thanks for the food"]},
+ {"form": "よろしく", "key": "yoroshiku", "domain": "idiom", "impact": 1, "note": "Open-ended request for goodwill; rendering depends on the situation.", "suggestions": ["nice to meet you", "I'm counting on you"]}
+]

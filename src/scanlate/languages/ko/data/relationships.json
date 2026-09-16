@@ -1,0 +1,10 @@
+[
+ {"form": "형", "relation": "older_brother_of_male", "options": ["hyung", "bro", "older brother"], "may_be_non_kin": true, "register": "CASUAL", "note": "Used by a male speaker to an older male; very often not a blood relative."},
+ {"form": "누나", "relation": "older_sister_of_male", "options": ["noona", "sis", "older sister"], "may_be_non_kin": true, "register": "CASUAL", "note": "Male speaker to an older female."},
+ {"form": "오빠", "relation": "older_brother_of_female", "options": ["oppa", "older brother", "name"], "may_be_non_kin": true, "register": "CASUAL", "note": "Female speaker to an older male; can carry romantic warmth."},
+ {"form": "언니", "relation": "older_sister_of_female", "options": ["unnie", "sis", "older sister"], "may_be_non_kin": true, "register": "CASUAL", "note": "Female speaker to an older female."},
+ {"form": "동생", "relation": "younger_sibling", "options": ["younger sibling", "kid", "name"], "may_be_non_kin": true, "register": "NEUTRAL", "note": null},
+ {"form": "아저씨", "relation": "middle_aged_man", "options": ["mister", "sir", "old man"], "may_be_non_kin": true, "register": "CASUAL", "note": "Address for an unrelated middle-aged man."},
+ {"form": "이모", "relation": "aunt", "options": ["auntie", "ma'am"], "may_be_non_kin": true, "register": "CASUAL", "note": "Literally maternal aunt; also friendly address to an older woman."},
+ {"form": "선배", "relation": "senior", "options": ["sunbae", "senior", "name only"], "may_be_non_kin": true, "register": "POLITE", "note": "Not kinship, same address-form decision."}
+]
