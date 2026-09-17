@@ -611,6 +611,77 @@ async function pageOcrAndFailures() {
   ok(errors.length === 0, `OCR failure throws nothing (${errors.map(String)})`);
 }
 
+async function pagePreviewAndExport() {
+  console.log("page preview and export");
+  const calls = [];
+  const { window, document, errors } = await openPageTab(pageFetch(calls, {
+    "/preview": () => json({
+      results: [{ segment_id: "s1", kind: "speech_bubble", rendered: true, reason: null }],
+      flagged: [] }),
+    "/export": () => json({ reference: "demo/exports/chapter-1-page-1-translated.png",
+                            report: { results: [], flagged: [] } }),
+  }));
+
+  document.querySelector('button[data-page="mode-preview"]').click();
+  await settle(80);
+
+  const previewImg = document.querySelector(".canvas-stage img");
+  ok(previewImg?.getAttribute("src") === "/api/pages/pg1/preview.png",
+     "Preview swaps the stage image to the rendered preview endpoint");
+  ok(!document.querySelector(".region"), "no region overlay while previewing");
+  ok(document.querySelector('button[data-page="tool-select"]')?.disabled,
+     "Select is disabled while previewing");
+  ok(document.querySelector('button[data-page="tool-draw"]')?.disabled,
+     "Add region is disabled while previewing");
+  ok(calls.some(c => c.url.includes("/preview") && !c.url.includes(".png")),
+     "fetches the render report");
+  ok(document.querySelector(".panel h3")?.textContent === "Preview",
+     "the panel shows the preview summary instead of region editing");
+  ok(document.querySelector(".panel").textContent.includes("Every approved region rendered"),
+     "a clean render says so rather than staying silent");
+
+  // The stage has no id="stage" while previewing, so a click there is inert —
+  // this is what "spatial editing is disabled" actually means in the DOM.
+  document.querySelector(".canvas-stage").dispatchEvent(
+    new window.MouseEvent("mousedown", { bubbles: true, clientX: 10, clientY: 10 }));
+  await settle(30);
+  ok(errors.length === 0, `entering preview and clicking it throws nothing (${errors.map(String)})`);
+
+  document.querySelector('button[data-page="export"]').click();
+  await settle(80);
+  ok(calls.some(c => c.method === "POST" && c.url.includes("/export")),
+     "Export posts to the export endpoint");
+  ok(document.querySelector(".panel .ocr-note")?.textContent.includes("Exported to"),
+     "the export result is shown as a note");
+
+  document.querySelector('button[data-page="mode-edit"]').click();
+  await settle(50);
+  ok(document.querySelector('.region[data-segment="s1"]'), "Edit restores the interactive stage");
+  ok(document.querySelector('button[data-page="tool-select"]')?.disabled === false,
+     "Select is enabled again back in Edit");
+  ok(errors.length === 0, `the whole preview/export round trip throws nothing (${errors.map(String)})`);
+}
+
+async function pagePreviewFlagsRegions() {
+  console.log("page preview flags regions");
+  const calls = [];
+  const reason = "background isn't flat (max channel std-dev 42.0)";
+  const { window, document, errors } = await openPageTab(pageFetch(calls, {
+    "/preview": () => json({
+      results: [{ segment_id: "s1", kind: "speech_bubble", rendered: false, reason }],
+      flagged: [{ segment_id: "s1", kind: "speech_bubble", rendered: false, reason }] }),
+  }));
+
+  document.querySelector('button[data-page="mode-preview"]').click();
+  await settle(80);
+
+  ok(document.querySelector(".panel").textContent.includes("1 region couldn't be"),
+     "a flagged region is surfaced, not silently presented as a finished page");
+  ok(document.querySelector(".panel .warn li")?.textContent.includes(reason),
+     "the specific reason a region was flagged is shown");
+  ok(errors.length === 0, `a flagged preview throws nothing (${errors.map(String)})`);
+}
+
 async function pageWithNoImage() {
   console.log("page tab with no pages");
   const { window, document, errors } = await openPageTab(url => {
@@ -840,6 +911,7 @@ for (const scenario of [backendUnavailable, slowBackend, emptyProject, failedPat
                         glossaryAndMemoryTabsShowRealData, glossaryAndMemoryTabsHandleEmptyState,
                         pageWorkspace, pageZoomKeepsCoordinates,
                         pageDrawAndDelete, pageEscapeAndDelete, pageOcrAndFailures,
+                        pagePreviewAndExport, pagePreviewFlagsRegions,
                         pageWithNoImage, projectsHome, pagePanelTextareas, pagePanelApprove, pageChapters,
                         pageImportUsesTheSelectedChapter, apiBaseIsHonoured]) {
   await scenario();

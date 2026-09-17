@@ -729,6 +729,7 @@ async function openProject(projectId) {
   state.tab = "page";
   state.glossaryList = null; state.memoryList = null;
   page.id = null; page.list = null; page.data = null; page.selected = null;
+  page.preview = false; page.previewReport = null;
   await load();
 }
 
@@ -763,7 +764,8 @@ document.addEventListener("keydown", e => {
 // sent to the server.
 // ---------------------------------------------------------------------
 const page = { id: null, data: null, scale: 1, fit: true, selected: null, mode: "select",
-               busy: false, note: null, chapterId: null, chapters: [], pendingSource: null };
+               busy: false, note: null, chapterId: null, chapters: [], pendingSource: null,
+               preview: false, previewReport: null };
 
 const KINDS = ["dialogue", "thought", "narration", "sfx", "sign", "other"];
 const LANGUAGES = [["", "auto"], ["ja", "Japanese"], ["ko", "Korean"], ["en", "English"]];
@@ -815,15 +817,27 @@ function renderPage(view) {
         <div class="stage-bar">
           <span class="tools">
             <button class="tool" data-page="tool-select" aria-pressed="${page.mode === "select"}"
-              title="Select and move regions">Select</button>
+              ${page.preview ? "disabled" : ""} title="Select and move regions">Select</button>
             <button class="tool" data-page="tool-draw" aria-pressed="${page.mode === "draw"}"
+              ${page.preview ? "disabled" : ""}
               title="Drag on the page to add a region (Esc cancels)">Add region</button>
           </span>
           <span class="divider"></span>
-          <button class="quiet" data-page="detect" ${page.busy || !page.data ? "disabled" : ""}
+          <button class="quiet" data-page="detect" ${page.busy || !page.data || page.preview ? "disabled" : ""}
             title="Find text automatically, then delete anything it got wrong">Detect</button>
-          <button class="quiet" data-page="ocr-page" ${page.busy || !page.data ? "disabled" : ""}
+          <button class="quiet" data-page="ocr-page" ${page.busy || !page.data || page.preview ? "disabled" : ""}
             title="Read every empty region">OCR page</button>
+          <span class="divider"></span>
+          <span class="tools">
+            <button class="tool" data-page="mode-edit" aria-pressed="${!page.preview}"
+              ${page.busy || !page.data ? "disabled" : ""}
+              title="Edit regions">Edit</button>
+            <button class="tool" data-page="mode-preview" aria-pressed="${page.preview}"
+              ${page.busy || !page.data ? "disabled" : ""}
+              title="See the page with approved translations rendered in">Preview</button>
+          </span>
+          <button class="quiet" data-page="export" ${page.busy || !page.data ? "disabled" : ""}
+            title="Write a translated PNG for this page">Export</button>
           <span class="divider"></span>
           <select id="chapter-picker" title="Chapter">
             ${page.chapters.map(c => `<option value="${esc(c.id)}"
@@ -864,6 +878,15 @@ function stageHTML() {
           <p>Create a chapter, then import pages into it.</p></div>`;
   }
   const w = toScreen(page.data.width), h = toScreen(page.data.height);
+  if (page.preview) {
+    // A plain rendered image, deliberately with no region overlay and no
+    // "stage" id — the click/drag handlers below key off that id, so this
+    // is how spatial editing stays off while a preview is showing.
+    return `<div class="canvas-stage" style="width:${w}px; height:${h}px">
+        <img src="${API}/api/pages/${esc(page.data.id)}/preview.png"
+             alt="Preview of page ${page.data.number} with approved translations rendered in">
+      </div>`;
+  }
   const regions = (page.data.regions || []).map((r, index) => {
     const box = r.region;
     const empty = !(r.source_text || "").trim();
@@ -888,8 +911,27 @@ function stageHTML() {
     </div>`;
 }
 
+// Flagged regions are surfaced here rather than left for the reader to
+// notice on their own — an incomplete page must look incomplete.
+function previewPanelHTML() {
+  const report = page.previewReport;
+  const flagged = report ? report.flagged : [];
+  const summary = !report
+    ? `<p class="hint">Rendering…</p>`
+    : flagged.length
+      ? `<p class="hint">${flagged.length} region${flagged.length === 1 ? "" : "s"} couldn't be
+         rendered automatically and need manual handling:</p>
+         <ul class="warn">${flagged.map(f => `<li data-sev="WARNING">
+           <div class="line"><span class="dot"></span>
+             <span>${esc(f.reason || "needs manual handling")}</span></div></li>`).join("")}</ul>`
+      : `<p class="hint">Every approved region rendered. Nothing needs manual handling.</p>`;
+  return `<div class="card"><h3>Preview</h3>${summary}
+    ${page.note ? noteHTML(page.note) : ""}</div>`;
+}
+
 function panelHTML(segment) {
   if (!page.data) return "";
+  if (page.preview) return previewPanelHTML();
   if (!segment) {
     return `<div class="card"><h3>Nothing selected</h3>
       <p class="hint">Click a region to work on it, or choose <strong>Add region</strong>
@@ -1047,6 +1089,27 @@ async function pageAction(action, element) {
     if (action === "fit") { page.fit = true; render(); return; }
     if (action === "tool-select") { page.mode = "select"; render(); return; }
     if (action === "tool-draw") { page.mode = "draw"; render(); return; }
+    if (action === "mode-edit") { page.preview = false; page.previewReport = null; render(); return; }
+    if (action === "mode-preview") {
+      page.busy = true; page.preview = true; page.selected = null; render();
+      try {
+        page.previewReport = await request(`/api/pages/${page.id}/preview`);
+      } catch (error) {
+        fail(error);
+        page.previewReport = null;
+      }
+      return;
+    }
+    if (action === "export") {
+      page.busy = true; render();
+      const result = await request(`/api/pages/${page.id}/export`, "POST");
+      const flaggedCount = result.report.flagged.length;
+      page.note = { level: flaggedCount ? "warn" : "info",
+        text: `Exported to ${result.reference}` + (flaggedCount
+          ? ` — ${flaggedCount} region${flaggedCount === 1 ? "" : "s"} need manual handling.`
+          : ".") };
+      return;
+    }
     if (action === "prev" || action === "next") { stepRegion(action === "next" ? 1 : -1); return; }
 
     if (action === "detect") {
@@ -1114,7 +1177,7 @@ async function pageAction(action, element) {
   } finally {
     page.busy = false;
     if (element) element.disabled = false;
-    if (["detect", "ocr-page", "ocr-one"].includes(action)) render();
+    if (["detect", "ocr-page", "ocr-one", "mode-preview", "export"].includes(action)) render();
   }
 }
 
@@ -1448,11 +1511,13 @@ document.getElementById("view").addEventListener("change", e => {
   if (e.target.id === "chapter-picker") {
     page.chapterId = e.target.value || null;
     page.id = null; page.selected = null; page.note = null; page.list = null;
+    page.preview = false; page.previewReport = null;
     loadPages().then(render).catch(fail);
     return;
   }
   if (e.target.id === "page-picker") {
     page.id = e.target.value; page.selected = null; page.fit = true; page.note = null;
+    page.preview = false; page.previewReport = null;
     request(`/api/pages/${page.id}`).then(data => { page.data = data; render(); }).catch(fail);
     return;
   }
