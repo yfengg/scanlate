@@ -157,6 +157,25 @@ def page(item: Page, segments: list[Segment] | None = None) -> dict:
     }
 
 
+def region_render_result(item) -> dict:
+    return {
+        "segment_id": item.segment_id,
+        "kind": item.kind.value,
+        "rendered": item.rendered,
+        "reason": item.reason,
+    }
+
+
+def render_report(report) -> dict:
+    """Which regions rendered and which were left as original artwork —
+    enough for the UI to say "N regions need manual handling" rather than
+    silently presenting an incomplete page as finished."""
+    return {
+        "results": [region_render_result(r) for r in report.results],
+        "flagged": [region_render_result(r) for r in report.flagged],
+    }
+
+
 def ocr_result(result) -> dict:
     return {
         "segment_id": result.segment_id,

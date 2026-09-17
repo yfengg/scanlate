@@ -119,6 +119,21 @@ class MediaStore:
             path.write_bytes(data)
         return f"{project_id}/{name}"
 
+    def store_export(self, project_id: str, filename: str, data: bytes) -> str:
+        """Write a translated-page export and return its reference.
+
+        Named predictably (chapter/page identity), not content-hashed like
+        ``store`` — so re-exporting the same page after an edit overwrites
+        only that page's previous export. Exports live under their own
+        ``exports/`` path, never the one an imported source occupies, so this
+        can never overwrite the source image.
+        """
+        name = self._component(filename, "export filename")
+        directory = self.project_dir(project_id) / "exports"
+        directory.mkdir(parents=True, exist_ok=True)
+        (directory / name).write_bytes(data)
+        return f"{project_id}/exports/{name}"
+
     def path(self, reference: str) -> Path:
         """Resolve a stored reference, refusing anything outside the root.
 

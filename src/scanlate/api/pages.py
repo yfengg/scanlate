@@ -8,6 +8,7 @@ wrong place to duplicate any of it.
 from __future__ import annotations
 
 import uuid
+from io import BytesIO
 
 from fastapi import APIRouter, File, Form, HTTPException, UploadFile
 from fastapi.responses import Response
@@ -126,6 +127,41 @@ def build_page_router(services) -> APIRouter:
                       "jpeg": "image/jpeg", "webp": "image/webp"}.get(suffix, "image/png")
         return Response(content=data, media_type=media_type,
                         headers={"Cache-Control": "private, max-age=60"})
+
+    # --- preview and export --------------------------------------------
+    @router.get("/api/pages/{page_id}/preview.png")
+    def preview_image(page_id: str):
+        """The rendered page as bytes, for the workbench's <img> element.
+        Never writes an export file — see POST .../export for that."""
+        page_or_404(page_id)
+        try:
+            rendered, _report = pages.render_page(page_id)
+        except ImageError as error:
+            raise HTTPException(404, str(error))
+        buffer = BytesIO()
+        rendered.save(buffer, format="PNG")
+        return Response(content=buffer.getvalue(), media_type="image/png",
+                        headers={"Cache-Control": "no-store"})
+
+    @router.get("/api/pages/{page_id}/preview")
+    def preview_report(page_id: str):
+        """The render report alone — which regions rendered and which need
+        manual handling — for the panel next to the <img> above."""
+        page_or_404(page_id)
+        try:
+            _rendered, report = pages.render_page(page_id)
+        except ImageError as error:
+            raise HTTPException(404, str(error))
+        return schemas.render_report(report)
+
+    @router.post("/api/pages/{page_id}/export")
+    def export_page(page_id: str):
+        page_or_404(page_id)
+        try:
+            reference, report = pages.export_page(page_id)
+        except ImageError as error:
+            raise HTTPException(404, str(error))
+        return {"reference": reference, "report": schemas.render_report(report)}
 
     @router.get("/api/pages/{page_id}/segments")
     def page_segments(page_id: str):

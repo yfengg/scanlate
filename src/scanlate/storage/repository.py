@@ -54,6 +54,10 @@ class ProjectRepository:
                 for r in self.conn.execute(
                     "SELECT * FROM chapters WHERE project_id = ? ORDER BY number", (project_id,))]
 
+    def get_chapter(self, chapter_id: str) -> Chapter | None:
+        row = self.conn.execute("SELECT * FROM chapters WHERE id = ?", (chapter_id,)).fetchone()
+        return Chapter(row["id"], row["project_id"], row["number"], row["title"]) if row else None
+
     def create_page(self, page: Page) -> Page:
         self.conn.execute(
             "INSERT INTO pages (id, project_id, chapter_id, number, image_path, width, height) "
@@ -200,6 +204,13 @@ class ProjectRepository:
         self.conn.execute("UPDATE segments SET region_json = ?, render_json = ? WHERE id = ?",
                           (_dump(region_to_dict(region)),
                            _dump(render_to_dict(render)) if render else None, segment_id))
+
+    def set_render(self, segment_id: str, render) -> None:
+        """Persist computed typeset settings (the font size that fit, etc.)
+        without touching the region's geometry — unlike ``set_region``, which
+        always rewrites both together."""
+        self.conn.execute("UPDATE segments SET render_json = ? WHERE id = ?",
+                          (_dump(render_to_dict(render)), segment_id))
 
     def delete_segment(self, segment_id: str) -> None:
         self.conn.execute("DELETE FROM segments WHERE id = ?", (segment_id,))

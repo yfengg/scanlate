@@ -25,6 +25,9 @@ from __future__ import annotations
 
 import uuid
 from dataclasses import dataclass
+from io import BytesIO
+
+from PIL import Image
 
 from ..core.types import SegmentKind
 from ..languages import AdapterRegistry
@@ -34,8 +37,9 @@ from ..storage.repository import ProjectRepository
 from ..storage.unit_of_work import UnitOfWork
 from .detection import DetectorError, DetectorUnavailable, TextRegionDetector
 from .importer import ImageError, MediaStore
-from .layout import BoundingBox, Region, RegionKind, TextOrientation
+from .layout import BoundingBox, Region, RegionKind, RenderSettings, TextOrientation
 from .ocr import OcrBackend, OcrError, OcrResult
+from .render import PageRenderer, RenderableRegion, RenderReport
 
 REGION_KIND_FOR_SEGMENT = {
     SegmentKind.DIALOGUE: RegionKind.SPEECH_BUBBLE,
@@ -107,7 +111,7 @@ class PageService:
     def __init__(self, repository: ProjectRepository, media: MediaStore,
                  detector: TextRegionDetector, ocr: OcrBackend,
                  adapters: AdapterRegistry, memory: TranslationMemory,
-                 uow: UnitOfWork | None = None):
+                 uow: UnitOfWork | None = None, renderer: PageRenderer | None = None):
         self.repository = repository
         self.media = media
         self.detector = detector
@@ -115,6 +119,7 @@ class PageService:
         self.adapters = adapters
         self.memory = memory
         self.uow = uow or repository.uow
+        self.renderer = renderer or PageRenderer()
 
     # --- regions -------------------------------------------------------
     def create_region(self, page_id: str, box: BoundingBox, kind: SegmentKind = SegmentKind.OTHER,
@@ -316,6 +321,69 @@ class PageService:
         message = (f"The {what} changed, so the approved translation no longer applies to "
                    f"this segment. It's back in review.") if reopened else None
         return SourceTextChange(segment_id, reopened, message, what)
+
+    # --- rendering (preview/export) -------------------------------------
+    def render_page(self, page_id: str) -> tuple[Image.Image, RenderReport]:
+        """Composite every approved region's cleaned bubble/typeset translation
+        (or SFX caption) onto a copy of the source page.
+
+        Never writes to disk — this is what both Preview and Export call, but
+        only Export goes on to persist the result. Regions belonging to a
+        segment that isn't approved yet are left as original artwork; they
+        are simply not in the list handed to the renderer.
+        """
+        page = self._page(page_id)
+        project = self.repository.get_project(page.project_id)
+        target_language = project.target_language if project else "en"
+        image = Image.open(BytesIO(self.media.read(page.image_path)))
+        regions = self._renderable_regions(page_id, target_language)
+        rendered, report = self.renderer.render(image, regions)
+        self._persist_applied_render(report)
+        return rendered, report
+
+    def export_page(self, page_id: str) -> tuple[str, RenderReport]:
+        """Render and write a PNG at the source's exact dimensions.
+
+        The filename comes from chapter/page identity, not a content hash —
+        predictable and human-readable, and stable across re-exports of the
+        same page after an edit (each overwrites only its own previous
+        export). The imported source file is never touched: exports live
+        under their own ``exports/`` path, never the source's.
+        """
+        page = self._page(page_id)
+        rendered, report = self.render_page(page_id)
+        buffer = BytesIO()
+        rendered.save(buffer, format="PNG")
+        reference = self.media.store_export(page.project_id, self._export_filename(page),
+                                            buffer.getvalue())
+        return reference, report
+
+    def _renderable_regions(self, page_id: str, target_language: str) -> list[RenderableRegion]:
+        regions = []
+        for segment in self.repository.list_page_segments(page_id):
+            if segment.state.status is not Status.APPROVED:
+                continue                        # left as original artwork
+            if segment.region is None or segment.region.box is None:
+                continue
+            regions.append(RenderableRegion(
+                segment.id, segment.region.kind, segment.region.box,
+                segment.state.candidate or "", segment.render or RenderSettings(),
+                target_language))
+        return regions
+
+    def _persist_applied_render(self, report: RenderReport) -> None:
+        """Save the font size that actually fit, so the next render starts
+        there instead of re-searching from scratch. No mask is recorded —
+        cleanup is cheap to recompute from the source image every time."""
+        with self.uow.transaction():
+            for result in report.results:
+                if result.applied_render is not None:
+                    self.repository.set_render(result.segment_id, result.applied_render)
+
+    def _export_filename(self, page) -> str:
+        chapter = self.repository.get_chapter(page.chapter_id) if page.chapter_id else None
+        chapter_number = chapter.number if chapter else "x"
+        return f"chapter-{chapter_number}-page-{page.number}-translated.png"
 
     # --- helpers -------------------------------------------------------
     def _region(self, box: BoundingBox, kind: SegmentKind,
