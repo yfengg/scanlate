@@ -13,25 +13,41 @@ reworking the translation system. `tests/test_architecture.py` enforces that.
 ## Requirements
 
 * Python 3.11+
-* Tesseract, for OCR (optional — regions can be typed by hand)
-* Node with jsdom, for the frontend tests only
+* Node, for the frontend tests only (`npm install` pulls in jsdom, a
+  devDependency — nothing global to install)
+* Tesseract, for real OCR (optional — regions can always be typed by hand)
 
 ## Install
 
 ```bash
 python -m venv .venv && source .venv/bin/activate
 pip install -e '.[dev,fuzzy]'
+```
 
-# OCR (optional). Debian/Ubuntu:
+That alone is a complete, working install: Pillow and python-multipart are
+plain dependencies, not extras, so plain Scanlate — running the app and
+importing pages — works with nothing more. `dev,fuzzy` adds pytest, httpx and
+fuzzy translation-memory matching for the test suite.
+
+Everything else is an optional, heavier extra, install only what you need:
+
+```bash
+# OpenCV-backed region detection + Tesseract's Python binding (small):
+pip install -e '.[detect,ocr]'
+# Debian/Ubuntu also needs the tesseract executable itself — pip cannot
+# install that part, it isn't a Python package:
 sudo apt install tesseract-ocr tesseract-ocr-jpn tesseract-ocr-jpn-vert tesseract-ocr-kor
-pip install pillow opencv-python-headless pytesseract python-multipart
 
-# Real neural MT instead of the deterministic phrase table (optional, large):
+# manga-ocr: Japanese-specialized OCR (optional, large — torch + transformers):
+pip install -e '.[mangaocr]'
+
+# OPUS-MT: real neural MT instead of the deterministic phrase table (optional, large):
 pip install -e '.[mt]'
 ```
 
-Without Tesseract or OpenCV the app still runs: detection and OCR report
-themselves unavailable and you draw regions and type source text by hand.
+Without `.[detect,ocr]` (or without the Tesseract executable even with it
+installed) the app still runs: detection and OCR report themselves
+unavailable and you draw regions and type source text by hand.
 
 ## Run
 
@@ -120,8 +136,8 @@ The header shows which translation backend is loaded. `lexicon (development)`
 means no MT model is installed and the candidates are deterministic fixture
 output, not translation — install `.[mt]` for OPUS-MT.
 
-For Japanese OCR, manga-ocr is preferred when installed (`pip install
-manga-ocr`: ~2–3 GB of torch, plus ~450 MB of weights downloaded on first use).
+For Japanese OCR, manga-ocr is preferred when installed (`pip install -e
+'.[mangaocr]'`: ~2–3 GB of torch, plus ~450 MB of weights downloaded on first use).
 Tesseract is the fallback for every language, and on vertical Japanese it is
 poor — `python tools/ocr_bench.py` builds a vertical-Japanese page and prints
 both engines side by side.
@@ -130,7 +146,7 @@ both engines side by side.
 
 ```bash
 python -m pytest                       # 216 tests
-node tests/frontend/test_workbench.mjs # 94 browser checks (needs: npm install jsdom)
+node tests/frontend/test_workbench.mjs # 105 browser checks (needs: npm install)
 ```
 
 `tests/frontend/trace_network.mjs` is a scriptable stand-in for watching the

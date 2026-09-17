@@ -1150,7 +1150,8 @@ document.addEventListener("mouseup", async () => {
       if (geometry.width < 6 || geometry.height < 6) { render(); return; }
       const created = await request(`/api/pages/${page.id}/regions`, "POST",
         { ...geometry, kind: "dialogue" });
-      page.mode = "select";
+      // Stay in draw mode so several bubbles can be drawn back to back; only
+      // an explicit Select click or Esc should leave it.
       await refreshPage(false);
       selectSegment(created.id);
       return;
@@ -1225,7 +1226,11 @@ document.getElementById("view").addEventListener("click", async e => {
   if (!btn) return;
   const act = btn.dataset.act;
   if (act === "all") { setFilter("all"); return; }
-  const seg = find(card.dataset.id);
+  // Review's actions sit inside a .seg card; the Page panel's actions sit
+  // beside the canvas instead, so the segment there is page.selected.
+  const segId = card ? card.dataset.id : page.selected;
+  if (!segId) return;
+  const seg = find(segId);
   if (!seg) return;
   btn.disabled = true;
 

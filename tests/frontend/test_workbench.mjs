@@ -396,8 +396,28 @@ async function pageDrawAndDelete() {
        `posts image coordinates (${JSON.stringify(body)})`);
   }
   ok(errors.length === 0, `drawing throws nothing (${errors.map(String)})`);
+  ok(document.querySelector('button[data-page="tool-draw"]').getAttribute("aria-pressed") === "true",
+     "Add region stays active after drawing one, so several bubbles can be drawn in a row");
+  ok(document.querySelector(".canvas-stage.drawmode"), "the canvas stays in draw mode");
+
+  // A second bubble can be drawn immediately, with no Select click in between.
+  const stage2 = document.getElementById("stage");
+  stage2.getBoundingClientRect = () => ({ left: 0, top: 0, width: 500, height: 700 });
+  stage2.dispatchEvent(new window.MouseEvent("mousedown", { bubbles: true, clientX: 300, clientY: 320 }));
+  document.dispatchEvent(new window.MouseEvent("mousemove", { bubbles: true, clientX: 360, clientY: 400 }));
+  document.dispatchEvent(new window.MouseEvent("mouseup", { bubbles: true }));
+  await settle(80);
+  const posts = calls.filter(c => c.method === "POST" && c.url.includes("/regions"));
+  ok(posts.length === 2, "a second region can be drawn without reselecting the tool");
+  ok(document.querySelector('button[data-page="tool-draw"]').getAttribute("aria-pressed") === "true",
+     "still in draw mode after the second region");
+
+  // Only an explicit Select click leaves draw mode.
+  document.querySelector('button[data-page="tool-select"]').click();
+  await settle(30);
   ok(document.querySelector('button[data-page="tool-select"]').getAttribute("aria-pressed") === "true",
-     "drawing returns to the Select tool");
+     "clicking Select leaves draw mode");
+  ok(!document.querySelector(".canvas-stage.drawmode"), "the canvas is no longer in draw mode");
 }
 
 async function pageEscapeAndDelete() {
@@ -565,6 +585,47 @@ async function pagePanelTextareas() {
   ok(errors.length === 0, `typing in the translation box throws nothing (${errors.map(String)})`);
 }
 
+// --- 8b. Page panel Approve ---------------------------------------------
+async function pagePanelApprove() {
+  console.log("page panel approve");
+  const calls = [];
+  // Fresh, self-contained responses for the segments list and approve calls
+  // rather than the shared PROJECT/SEGMENT fixtures: load() aliases
+  // state.data.segments directly to the response's segments array, so an
+  // earlier scenario's approve (which replaces that array's entry in place
+  // via merge()) can leave the shared fixture looking pre-approved for every
+  // later test that falls back to it. Not part of either bug being fixed
+  // here, just avoided so this test's assertions are deterministic.
+  const { window, document, errors } = await openPageTab(pageFetch(calls, {
+    "/api/projects/demo/segments": () => json({ project: PROJECT.project,
+      segments: [{ ...SEGMENT, candidate: "Please be quiet.", status: "machine", needs_review: true }] }),
+    "/approve": () => json({ segment: { ...SEGMENT, candidate: "Please be quiet.",
+                             status: "approved", needs_review: false },
+                             memory_entry_id: 1, suggestion: null }),
+  }));
+
+  // Select the region so the panel (not a .seg card) is showing the Approve button.
+  document.querySelector('.region[data-segment="s1"]').dispatchEvent(
+    new window.MouseEvent("mousedown", { bubbles: true, clientX: 50, clientY: 70 }));
+  document.dispatchEvent(new window.MouseEvent("mouseup", { bubbles: true }));
+  await settle(60);
+
+  const approveBtn = document.querySelector('.panel button[data-act="approve"]');
+  ok(approveBtn, "the page panel has an Approve button");
+  ok(!document.querySelector(".seg"), "the page panel button is not inside a .seg card");
+
+  approveBtn.click();
+  await settle(80);
+
+  ok(errors.length === 0, `clicking Page-panel Approve throws nothing (${errors.map(String)})`);
+  ok(calls.some(c => c.url.includes("/segments/s1/approve")),
+     "it calls the same approve endpoint Review uses");
+  ok(document.querySelector(".panel .state")?.textContent === "Approved",
+     "the panel visibly shows Approved");
+  ok(!document.querySelector('.panel button[data-act="approve"]'),
+     "the Approve button is replaced by Reopen once approved");
+}
+
 // --- 9. chapters --------------------------------------------------------
 const CHAPTERS = [{ id: "ch1", number: 1, title: "One" }, { id: "ch2", number: 2, title: "Two" }];
 const PAGE_CH2 = { ...PAGE_FIXTURE, id: "pg2", chapter_id: "ch2", number: 1, regions: [] };
@@ -686,7 +747,7 @@ async function apiBaseIsHonoured() {
 for (const scenario of [backendUnavailable, slowBackend, emptyProject, failedPatchRetries,
                         failedGlossaryAccept, happyPath, pageWorkspace, pageZoomKeepsCoordinates,
                         pageDrawAndDelete, pageEscapeAndDelete, pageOcrAndFailures,
-                        pageWithNoImage, projectsHome, pagePanelTextareas, pageChapters,
+                        pageWithNoImage, projectsHome, pagePanelTextareas, pagePanelApprove, pageChapters,
                         pageImportUsesTheSelectedChapter, apiBaseIsHonoured]) {
   await scenario();
 }

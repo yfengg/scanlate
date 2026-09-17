@@ -7,7 +7,12 @@ name = "scanlate"
 version = "0.1.0"
 description = "Language-neutral comic translation workbench with pluggable language adapters and MT backends"
 requires-python = ">=3.11"
-dependencies = ["fastapi>=0.110", "pydantic>=2", "uvicorn>=0.29"]
+# Pillow backs page import (imaging/importer.py:inspect) unconditionally, not
+# just the optional OCR path, and python-multipart is what lets FastAPI parse
+# the multipart page-upload request at all — both are needed for the plain
+# import-a-page workflow to work, so they are not optional extras.
+dependencies = ["fastapi>=0.110", "pydantic>=2", "uvicorn>=0.29",
+                "pillow>=10", "python-multipart>=0.0.9"]
 
 [project.optional-dependencies]
 fuzzy = ["rapidfuzz>=3"]
@@ -16,7 +21,17 @@ fuzzy = ["rapidfuzz>=3"]
 mt = ["transformers>=4.40,<5", "torch>=2.2", "sentencepiece>=0.2"]
 ja = ["fugashi>=1.3", "unidic-lite>=1.0.8"]
 ko = ["kiwipiepy>=0.17"]
-dev = ["pytest>=8", "httpx>=0.27", "rapidfuzz>=3"]
+# Automatic region detection (imaging/detection.py:OpenCvComicTextDetector).
+# Without it, /detect reports itself unavailable and regions are drawn by hand.
+detect = ["opencv-python-headless>=4.8"]
+# Tesseract's Python binding (imaging/ocr.py:TesseractOcr). The tesseract
+# binary itself is a system package, not something pip can install; without
+# it on PATH, OCR reports itself unavailable and source text is typed by hand.
+ocr = ["pytesseract>=0.3.10"]
+# Japanese-specialized OCR (imaging/manga_ocr_backend.py), preferred over
+# Tesseract for Japanese when installed. Heavy: pulls its own torch/transformers.
+mangaocr = ["manga-ocr>=0.1.8"]
+dev = ["pytest>=8", "httpx>=0.27"]
 
 [project.scripts]
 scanlate = "scanlate.__main__:main"

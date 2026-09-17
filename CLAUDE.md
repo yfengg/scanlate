@@ -11,9 +11,16 @@ pip install -e '.[dev,fuzzy]'
 SCANLATE_DB=scanlate.db SCANLATE_MEDIA=media python -m scanlate   # http://127.0.0.1:8000
 
 python -m pytest                        # 216 tests
-node tests/frontend/test_workbench.mjs  # 94 jsdom checks (npm install jsdom first)
+node tests/frontend/test_workbench.mjs  # 105 jsdom checks (npm install first)
 python tools/ocr_bench.py               # vertical-Japanese page, Tesseract vs manga-ocr
 ```
+
+Pillow and python-multipart are plain dependencies (page import needs them
+unconditionally) and install with the line above. The OCR/detection-backed
+tests additionally need `.[detect,ocr]` (opencv-python-headless,
+pytesseract) — and, for the two that assert real recognized text rather than
+just "ok or a graceful error", the tesseract binary itself on PATH, which pip
+cannot install. `.[mangaocr]` adds manga-ocr for Japanese.
 
 Environment: `SCANLATE_DB` (`:memory:`), `SCANLATE_MEDIA` (`media`),
 `SCANLATE_BACKEND` (`auto|opus|lexicon`), `SCANLATE_OCR`
@@ -201,19 +208,25 @@ scoped to `.seg` cards (Review); the Page panel's boxes are not inside one.
 
 ## Known bugs (open, diagnosed)
 
-1. **Page-panel Approve does nothing.** In `index.html`, the `#view` click
-   handler (the one handling `button[data-act]`) resolves the segment with
+None currently open.
+
+## Recently fixed
+
+1. **Page-panel Approve did nothing.** In `index.html`, the `#view` click
+   handler (the one handling `button[data-act]`) resolved the segment with
    `find(card.dataset.id)` where `card = e.target.closest(".seg")`. The Page
    panel is rendered by `translationHTML`, which has no `.seg` ancestor, so
-   `card` is null and the handler throws before reaching the approve branch.
-   Fix: resolve the id from the card **or** `page.selected`, route through the
-   same `/approve` call Review uses, refresh the page segment, and show
-   Approved. Needs a jsdom regression that clicks the actual Page-panel
+   `card` was null and the handler threw before reaching the approve branch.
+   Fixed by resolving the id from the card **or** `page.selected`; it routes
+   through the same `/approve` call Review uses, refreshes the Page panel, and
+   shows Approved. Regression: `pagePanelApprove` in
+   `tests/frontend/test_workbench.mjs`, which clicks the actual Page-panel
    button.
-2. **Add Region mode exits after one region.** The `mouseup` handler's draw
-   branch sets `page.mode = "select"` right after posting the new region. It
-   should stay in draw mode so several bubbles can be drawn consecutively; only
-   an explicit **Select** click or `Esc` should leave it.
+2. **Add Region mode exited after one region.** The `mouseup` handler's draw
+   branch set `page.mode = "select"` right after posting the new region.
+   Fixed so it stays in draw mode across several regions; only an explicit
+   **Select** click or `Esc` leaves it. Regression: extended
+   `pageDrawAndDelete`.
 
 Note for jsdom work: exceptions thrown inside event listeners reach the virtual
 console as `jsdomError`, not `window.onerror`. `boot()` forwards them; without
@@ -232,9 +245,14 @@ vertical bubbles. **Tesseract managed 1/6 exact, and the one it got right was
 the only horizontal line.** That is clean rendered type, so real scans will be
 worse — this is the case for manga-ocr.
 
-**manga-ocr and OPUS-MT have never actually run in this repo's CI environment**
-(`huggingface.co` is blocked there). Their behaviour is pinned by fakes; their
-accuracy is unmeasured. OPUS works locally with transformers 4.
+**CI environment:** manga-ocr and OPUS-MT have never actually run there
+(`huggingface.co` is blocked); their behaviour is pinned by fakes and
+unmeasured in that environment.
+
+**Maintainer's local Windows machine:** both have been run for real and
+verified working — manga-ocr against an actual manga page, OPUS-MT with
+transformers 4. Treat CI's fakes as a stand-in for a blocked network, not as
+evidence either backend is broken.
 
 ## Do not casually reverse
 
