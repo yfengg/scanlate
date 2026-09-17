@@ -115,7 +115,16 @@ def test_unchaptered_segments_see_only_their_own_kind(app):
 
 
 # --- 3. runtime backend selection --------------------------------------
-def test_backend_defaults_to_the_deterministic_lexicon():
+# These tests are the auto-selection logic itself, so each one explicitly
+# removes/overrides the deterministic-by-default SCANLATE_BACKEND that
+# tests/conftest.py's autouse fixture sets, and explicitly controls
+# OpusMtBackend's own availability -- never relying on whether transformers
+# genuinely happens to be installed and reachable in the environment running
+# the suite.
+def test_backend_defaults_to_the_deterministic_lexicon(monkeypatch):
+    monkeypatch.delenv(BACKEND_ENV, raising=False)
+    monkeypatch.setattr(OpusMtBackend, "unavailable_reason",
+                        lambda self: "transformers not installed (forced for this test)")
     assert build_backends().for_pair(LanguagePair("ja", "en")).name == "lexicon"
 
 
@@ -129,8 +138,8 @@ def test_backend_is_selected_from_the_environment(monkeypatch):
 
 def test_requesting_opus_without_the_model_fails_loudly(monkeypatch):
     monkeypatch.setenv(BACKEND_ENV, "opus")
-    if OpusMtBackend().available():
-        pytest.skip("transformers installed; the failure path is unreachable here")
+    monkeypatch.setattr(OpusMtBackend, "unavailable_reason",
+                        lambda self: "transformers isn't installed (forced for this test)")
     with pytest.raises(RuntimeError, match="transformers"):
         build_services()
 

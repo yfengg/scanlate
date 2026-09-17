@@ -15,7 +15,7 @@ from scanlate.api.app import create_app
 from scanlate.core.types import SegmentKind
 from scanlate.fixtures import build_services, seed_demo
 from scanlate.imaging.layout import BoundingBox
-from scanlate.imaging.ocr import OcrResult
+from scanlate.imaging.ocr import OcrResult, TesseractOcr
 from scanlate.storage.models import Chapter, Status
 from tests.test_imaging_corrections import FakeDetector, FakeOcr, png
 from scanlate.imaging.detection import DetectedRegion
@@ -191,6 +191,11 @@ def test_zero_detected_regions_is_valid(client):
 
 # --- OCR ----------------------------------------------------------------
 def test_ocr_writes_source_text_onto_the_segment(client):
+    # This fixture's rendered text is Latin, so it needs Tesseract
+    # specifically -- not whatever tests/conftest.py's deterministic
+    # default or an unrelated "auto" resolution would otherwise pick (e.g.
+    # manga-ocr, which reads Japanese only, if it happens to be installed).
+    client.services.page_service.ocr = TesseractOcr()
     page = import_page(client).json()
     segment = client.post(f"/api/pages/{page['id']}/regions",
                           json={"x": 40, "y": 40, "width": 265, "height": 95}).json()
@@ -230,6 +235,9 @@ def test_low_confidence_is_flagged_not_failed(client):
 
 
 def test_ocr_page_reads_every_empty_region(client):
+    # Same reasoning as test_ocr_writes_source_text_onto_the_segment: this
+    # fixture's text is Latin, so the test needs Tesseract explicitly.
+    client.services.page_service.ocr = TesseractOcr()
     page = import_page(client).json()
     for box in ({"x": 40, "y": 40, "width": 265, "height": 95},
                 {"x": 220, "y": 300, "width": 255, "height": 105}):
