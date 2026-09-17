@@ -141,6 +141,13 @@ place.
   `translation.development_backend` ("Machine translation backend
   unavailable…") and the header chip reads `lexicon (development)`. Never let a
   dev backend's word glosses look like real translation.
+- The pipeline builds neighbouring-context (`preceding`/`following`/`hints`)
+  into every `TranslationRequest`, but **neither shipped backend consumes
+  it** — `OpusMtBackend.translate()` passes only the isolated
+  `source_text` to the model. Carrying the data is not the same as a
+  backend acting on it; do not describe context as influencing machine
+  translation unless a backend actually reads it. See
+  `translation/backend.py`'s `TranslationRequest` docstring.
 
 ### Transformers must stay `<5`
 

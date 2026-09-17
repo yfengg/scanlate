@@ -111,7 +111,15 @@ def test_mixed_language_project_resolves_per_segment(app):
 
 
 # --- context ------------------------------------------------------------
-def test_approved_neighbour_translations_reach_the_backend(app):
+def test_neighbour_context_is_carried_in_the_request(app):
+    """The pipeline packages neighbouring source/target text into the
+    TranslationRequest it hands to whatever backend is selected.
+
+    This only proves the data reaches that request object -- it is not a
+    claim that context influences the translated output. Neither shipped
+    backend currently reads request.preceding/following/hints; see
+    translation/backend.py's TranslationRequest docstring.
+    """
     captured = {}
     backend = app.backends.for_pair(LanguagePair("ja", "en"))
     original = backend.translate

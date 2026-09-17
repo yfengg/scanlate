@@ -24,6 +24,20 @@ class TerminologyConstraint:
 
 @dataclass
 class TranslationRequest:
+    """What the pipeline hands a backend for one segment.
+
+    ``preceding``/``following``/``hints`` carry the neighbouring source and
+    approved-target text the pipeline builds from local context (see
+    ``context/local.py``). Carrying this data is not the same as a backend
+    acting on it: as of this writing, neither shipped backend
+    (``LexiconBackend``, ``OpusMtBackend``) reads any of these three fields
+    when generating a candidate -- ``OpusMtBackend.translate()`` passes only
+    ``source_text`` to the underlying model. Do not describe context as
+    influencing machine translation unless a backend actually consumes it.
+    ``constraints`` is consumed (by ``LexiconBackend``, and always applied
+    afterward by the pipeline's own glossary enforcement regardless of what
+    a backend does with it).
+    """
     source_text: str
     pair: LanguagePair
     preceding: list[str] = field(default_factory=list)
