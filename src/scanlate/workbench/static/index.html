@@ -88,6 +88,13 @@
     border-top: 1px solid var(--rule); }
   .alts .note { color: var(--graphite); font-size: 13px; }
   .alts button { margin-left: auto; }
+  .lib-list { list-style: none; margin: 10px 0 0; padding: 0; max-width: 46em; }
+  .lib-list li { display: flex; gap: 8px; align-items: baseline; padding: 8px 0;
+    border-top: 1px solid var(--rule); flex-wrap: wrap; }
+  .lib-list .term { font-weight: 600; }
+  .lib-list .arrow { color: var(--graphite); }
+  .lib-list .meta { color: var(--graphite); font-size: 13px; }
+  .lib-list button { margin-left: auto; }
   .warn { margin: 10px 0 0; padding: 0; list-style: none; max-width: 46em; }
   .warn li { padding: 8px 0; border-top: 1px solid var(--rule); }
   .warn .line { display: flex; gap: 8px; }
@@ -276,7 +283,8 @@ const ORIGIN_WORDS = {
   glossary: "glossary rule", manual: "written by hand", rule: "sound-effect rule" };
 
 let state = { data: null, tab: "review", filter: "all", focus: 0, diagnostics: false,
-              projects: null, health: null, screen: "projects" };
+              projects: null, health: null, screen: "projects",
+              glossaryList: null, memoryList: null };
 
 async function load() {
   const view = document.getElementById("view");
@@ -457,8 +465,10 @@ function visible() {
 }
 
 const EMPTY = {
-  glossary: ["Glossary", "Names, titles, techniques and relationship terms live here with their approved renderings and lock state. Approving a term in Review adds it."],
-  memory: ["Translation memory", "Approved lines are stored here with their source and target language, so repeated dialogue fills itself in across chapters."]
+  glossary: ["No glossary rules yet",
+    "Names, titles, techniques and relationship terms will live here with their approved renderings and lock state. Approving a term in Review adds one."],
+  memory: ["No approved lines yet",
+    "Approved translations will live here with their source and target text, so repeated dialogue fills itself in across chapters."]
 };
 
 function render() {
@@ -492,14 +502,128 @@ function render() {
         "Every segment here has been handled.",
         `<button class="quiet" data-act="all">Show all segments</button>`);
     }
-  } else {
-    const [title, body] = EMPTY[state.tab];
-    view.innerHTML = emptyState(title, body);
+  } else if (state.tab === "glossary") {
+    renderGlossary(view);
+  } else if (state.tab === "memory") {
+    renderMemory(view);
   }
   view.querySelectorAll("textarea").forEach(grow);
 }
 
+// ---------------------------------------------------------------------
+// Glossary and Memory: read-only browsing of project state that Review
+// writes to. Both lazy-load on first visit, the same pattern renderPage
+// uses for its own data, and cache the list in state until something here
+// or an approval elsewhere invalidates it.
+// ---------------------------------------------------------------------
+async function loadGlossary() {
+  try {
+    state.glossaryList = await request(`/api/projects/${PROJECT_ID}/glossary`);
+  } catch (error) {
+    state.glossaryList = [];
+    fail(error);
+  }
+}
 
+async function loadMemory() {
+  try {
+    state.memoryList = await request(`/api/projects/${PROJECT_ID}/memory`);
+  } catch (error) {
+    state.memoryList = [];
+    fail(error);
+  }
+}
+
+function renderGlossary(view) {
+  if (state.glossaryList === null) {
+    view.innerHTML = emptyState("Loading", "Fetching the project glossary.");
+    loadGlossary().then(render);
+    return;
+  }
+  if (!state.glossaryList.length) {
+    view.innerHTML = emptyState(...EMPTY.glossary);
+    return;
+  }
+  view.innerHTML = `
+    <div class="card">
+      <h3>Glossary</h3>
+      <p class="hint">${state.glossaryList.length} term${state.glossaryList.length === 1 ? "" : "s"}
+         with an approved rendering for this project.</p>
+      <ul class="lib-list">${state.glossaryList.map(glossaryRowHTML).join("")}</ul>
+    </div>`;
+}
+
+function glossaryRowHTML(entry) {
+  return `
+    <li data-id="${entry.id}">
+      <span class="term">${esc(entry.source_term)}</span>
+      <span class="arrow">→</span>
+      <span class="term">${esc(entry.target_term)}</span>
+      <span class="meta">${esc(entry.source_language)} → ${esc(entry.target_language)}
+        · ${esc(entry.category.replace(/_/g, " "))}${entry.notes ? " · " + esc(entry.notes) : ""}
+        ${entry.locked ? `· <span class="signal">locked</span>` : ""}</span>
+      <button class="quiet" data-lib-act="toggle-lock" data-lib="glossary" data-id="${entry.id}">
+        ${entry.locked ? "Unlock" : "Lock"}</button>
+    </li>`;
+}
+
+function renderMemory(view) {
+  if (state.memoryList === null) {
+    view.innerHTML = emptyState("Loading", "Fetching translation memory.");
+    loadMemory().then(render);
+    return;
+  }
+  if (!state.memoryList.length) {
+    view.innerHTML = emptyState(...EMPTY.memory);
+    return;
+  }
+  view.innerHTML = `
+    <div class="card">
+      <h3>Translation memory</h3>
+      <p class="hint">${state.memoryList.length} approved line${state.memoryList.length === 1 ? "" : "s"}
+         for this project, most recently approved first.</p>
+      <ul class="lib-list">${state.memoryList.map(memoryRowHTML).join("")}</ul>
+    </div>`;
+}
+
+function memoryRowHTML(entry) {
+  const used = `used ${entry.occurrences} time${entry.occurrences === 1 ? "" : "s"}`;
+  return `
+    <li data-id="${entry.id}">
+      <span class="term">${esc(entry.source_text)}</span>
+      <span class="arrow">→</span>
+      <span class="term">${esc(entry.target_text)}</span>
+      <span class="meta">${esc(entry.source_language)} → ${esc(entry.target_language)}
+        · ${used}${entry.canonical ? `· <span class="signal">canonical</span>` : ""}</span>
+      <button class="quiet" data-lib-act="toggle-canonical" data-lib="memory" data-id="${entry.id}">
+        ${entry.canonical ? "Unlock" : "Lock as canonical"}</button>
+    </li>`;
+}
+
+document.getElementById("view").addEventListener("click", async e => {
+  const btn = e.target.closest("button[data-lib-act]");
+  if (!btn) return;
+  const id = Number(btn.dataset.id);
+  const act = btn.dataset.libAct;
+  const lib = btn.dataset.lib;
+  btn.disabled = true;
+  try {
+    if (lib === "glossary" && act === "toggle-lock") {
+      const entry = state.glossaryList.find(g => g.id === id);
+      const updated = await request(`/api/glossary/${id}`, "PATCH", { locked: !entry.locked });
+      state.glossaryList = state.glossaryList.map(g => g.id === id ? updated : g);
+    } else if (lib === "memory" && act === "toggle-canonical") {
+      const entry = state.memoryList.find(m => m.id === id);
+      const updated = await request(`/api/memory/${id}/canonical?locked=${!entry.canonical}`, "POST");
+      state.memoryList = state.memoryList.map(m => m.id === id ? updated : m);
+    }
+    render();
+  } catch (error) {
+    fail(error);
+  } finally {
+    btn.disabled = false;
+  }
+});
 
 // ---------------------------------------------------------------------
 // Projects home. A fresh install lands here with nothing in it.
@@ -603,6 +727,7 @@ async function openProject(projectId) {
   state.screen = "project";
   state.data = null;
   state.tab = "page";
+  state.glossaryList = null; state.memoryList = null;
   page.id = null; page.list = null; page.data = null; page.selected = null;
   await load();
 }
@@ -1240,9 +1365,14 @@ document.getElementById("view").addEventListener("click", async e => {
         translation: seg.candidate,
         term_resolutions: seg._resolutions || [] });
       merge(payload.segment, { _pending: payload.suggestion, _resolutions: [] });
+      state.memoryList = null;      // approval may add or move a variant; refetch next visit
       return;
     }
-    if (act === "reopen") { merge(await apply(seg.id, "/reopen")); return; }
+    if (act === "reopen") {
+      merge(await apply(seg.id, "/reopen"));
+      state.memoryList = null;      // reopening releases this segment's occurrence
+      return;
+    }
     if (act === "reset") {
       merge(await apply(seg.id, "", { translation: seg._original, status: "machine" }, "PATCH"));
       return;
@@ -1262,6 +1392,7 @@ document.getElementById("view").addEventListener("click", async e => {
         target_language: rule.target_language, target_term: rule.target_term,
         category: rule.category || "relationship_term", locked: true });
       merge(await apply(seg.id, "", {}, "PATCH"));
+      state.glossaryList = null;    // a new rule now exists; refetch next visit
       return;
     }
     if (act === "just-once") { seg._pending = null; render(); return; }

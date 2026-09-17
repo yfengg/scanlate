@@ -292,6 +292,97 @@ async function happyPath() {
   ok(errors.length === 0, `the happy path throws nothing (${errors.map(String)})`);
 }
 
+// --- 6b. Glossary and Memory tabs ---------------------------------------
+const GLOSSARY_ENTRY = { id: 7, source_language: "ja", source_term: "先輩", target_language: "en",
+  target_term: "senpai", category: "title", locked: true, notes: "upperclassman" };
+
+const MEMORY_ENTRY = { id: 42, source_language: "ko", target_language: "en",
+  source_text: "저희가 처리하겠습니다.", target_text: "We'll take care of it.",
+  locked: true, canonical: true, occurrences: 3, updated_at: "2026-01-01 00:00:00" };
+
+async function glossaryAndMemoryTabsShowRealData() {
+  console.log("glossary and memory tabs");
+  const calls = [];
+  const fetchImpl = (url, options = {}) => {
+    calls.push({ url, method: options.method || "GET", body: options.body });
+    if (url.endsWith("/api/projects/demo/glossary") && (!options.method || options.method === "GET"))
+      return json([GLOSSARY_ENTRY]);
+    if (/\/api\/glossary\/\d+$/.test(url) && options.method === "PATCH")
+      return json({ ...GLOSSARY_ENTRY, locked: !GLOSSARY_ENTRY.locked });
+    if (url.endsWith("/api/projects/demo/memory") && (!options.method || options.method === "GET"))
+      return json([MEMORY_ENTRY]);
+    if (url.includes("/canonical") && options.method === "POST")
+      return json({ ...MEMORY_ENTRY, canonical: !MEMORY_ENTRY.canonical });
+    if (url.endsWith("/pages")) return json([]);
+    return json(PROJECT);
+  };
+  const { window, document, errors } = await boot(fetchImpl);
+
+  // Glossary: real data, not the old static placeholder.
+  document.querySelector('#tabs button[data-tab="glossary"]').click();
+  await settle(60);
+  ok(calls.some(c => c.method === "GET" && c.url.endsWith("/api/projects/demo/glossary")),
+     "clicking Glossary fetches the real glossary endpoint");
+  ok(document.getElementById("view").textContent.includes("先輩"),
+     "shows the real glossary source term");
+  ok(document.getElementById("view").textContent.includes("senpai"),
+     "shows the real glossary rendering");
+  ok(!document.getElementById("view").textContent.includes("Approving a term in Review adds one"),
+     "the old static placeholder copy is gone");
+
+  const lockBtn = document.querySelector('button[data-lib-act="toggle-lock"]');
+  ok(lockBtn?.textContent.trim() === "Unlock", "a locked entry offers Unlock");
+  lockBtn.click();
+  await settle(60);
+  ok(calls.some(c => c.method === "PATCH" && c.url.endsWith("/api/glossary/7")
+                 && JSON.parse(c.body).locked === false),
+     "the lock toggle PATCHes the real glossary entry with the flipped state");
+  ok(document.querySelector('button[data-lib-act="toggle-lock"]')?.textContent.trim() === "Lock",
+     "the button reflects the entry's new (unlocked) state after the round trip");
+
+  // Memory: real data, not the old static placeholder.
+  document.querySelector('#tabs button[data-tab="memory"]').click();
+  await settle(60);
+  ok(calls.some(c => c.method === "GET" && c.url.endsWith("/api/projects/demo/memory")),
+     "clicking Memory fetches the real memory endpoint");
+  ok(document.getElementById("view").textContent.includes("저희가 처리하겠습니다."),
+     "shows the real memory source line");
+  ok(document.getElementById("view").textContent.includes("We'll take care of it."),
+     "shows the real approved rendering");
+  ok(!document.getElementById("view").textContent.includes("repeated dialogue fills itself in"),
+     "the old static placeholder copy is gone");
+
+  document.querySelector('button[data-lib-act="toggle-canonical"]').click();
+  await settle(60);
+  ok(calls.some(c => c.method === "POST" && c.url.includes("/api/memory/42/canonical")
+                 && c.url.includes("locked=false")),
+     "the canonical toggle posts to the real memory entry with the flipped state");
+
+  ok(errors.length === 0, `glossary/memory tabs throw nothing (${errors.map(String)})`);
+}
+
+async function glossaryAndMemoryTabsHandleEmptyState() {
+  console.log("glossary and memory empty state");
+  const { window, document, errors } = await boot((url, options = {}) => {
+    if (url.endsWith("/glossary")) return json([]);
+    if (url.endsWith("/memory")) return json([]);
+    if (url.endsWith("/pages")) return json([]);
+    return json(PROJECT);
+  });
+
+  document.querySelector('#tabs button[data-tab="glossary"]').click();
+  await settle(60);
+  ok(document.getElementById("view").textContent.includes("No glossary rules yet"),
+     "an empty glossary says so instead of showing a stale/fake list");
+
+  document.querySelector('#tabs button[data-tab="memory"]').click();
+  await settle(60);
+  ok(document.getElementById("view").textContent.includes("No approved lines yet"),
+     "an empty memory tab says so");
+
+  ok(errors.length === 0, `empty glossary/memory tabs throw nothing (${errors.map(String)})`);
+}
+
 
 // --- 7. page workspace -------------------------------------------------
 const PAGE_FIXTURE = { id: "pg1", project_id: "demo", chapter_id: "ch1", number: 1,
@@ -745,7 +836,9 @@ async function apiBaseIsHonoured() {
 }
 
 for (const scenario of [backendUnavailable, slowBackend, emptyProject, failedPatchRetries,
-                        failedGlossaryAccept, happyPath, pageWorkspace, pageZoomKeepsCoordinates,
+                        failedGlossaryAccept, happyPath,
+                        glossaryAndMemoryTabsShowRealData, glossaryAndMemoryTabsHandleEmptyState,
+                        pageWorkspace, pageZoomKeepsCoordinates,
                         pageDrawAndDelete, pageEscapeAndDelete, pageOcrAndFailures,
                         pageWithNoImage, projectsHome, pagePanelTextareas, pagePanelApprove, pageChapters,
                         pageImportUsesTheSelectedChapter, apiBaseIsHonoured]) {
