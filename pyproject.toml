@@ -41,6 +41,9 @@ where = ["src"]
 
 [tool.setuptools.package-data]
 "*" = ["data/*.json"]
+# Bundled Latin typeset font (Lato, SIL OFL 1.1) so rendering is reproducible
+# regardless of what's installed on the machine. See imaging/fonts/OFL.txt.
+"scanlate.imaging" = ["fonts/*.ttf", "fonts/OFL.txt"]
 
 [tool.pytest.ini_options]
 pythonpath = ["src"]

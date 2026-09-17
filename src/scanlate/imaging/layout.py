@@ -56,7 +56,7 @@ class Region:
 
 @dataclass
 class RenderSettings:
-    font_id: str = "default"
+    font_id: str = "lato-regular"
     font_size: float = 16.0
     line_height: float = 1.2
     alignment: str = "center"
@@ -127,7 +127,7 @@ def render_from_dict(data: dict | None) -> RenderSettings | None:
         return None
     padding = data.get("padding") or [0, 0, 0, 0]
     return RenderSettings(
-        font_id=data.get("font_id", "default"), font_size=float(data.get("font_size", 16.0)),
+        font_id=data.get("font_id", "lato-regular"), font_size=float(data.get("font_size", 16.0)),
         line_height=float(data.get("line_height", 1.2)), alignment=data.get("alignment", "center"),
         rotation=float(data.get("rotation", 0.0)),
         orientation=TextOrientation(data.get("orientation", TextOrientation.HORIZONTAL.value)),
