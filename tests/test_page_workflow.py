@@ -14,8 +14,9 @@ from PIL import Image, ImageDraw
 from scanlate.api.app import create_app
 from scanlate.core.types import SegmentKind
 from scanlate.fixtures import build_services, seed_demo
-from scanlate.imaging.layout import BoundingBox
-from scanlate.imaging.ocr import OcrResult, TesseractOcr
+from scanlate.imaging.layout import BoundingBox, Polygon
+from scanlate.imaging.manga_ocr_backend import OcrRouter
+from scanlate.imaging.ocr import NullOcr, OcrResult, TesseractOcr
 from scanlate.storage.models import Chapter, Status
 from tests.test_imaging_corrections import FakeDetector, FakeOcr, png
 from scanlate.imaging.detection import DetectedRegion
@@ -162,6 +163,100 @@ def test_deleting_an_approved_region_needs_confirmation(client):
     assert kept["status"] == "approved" and kept["candidate"] == "Let's go!"
 
 
+def test_detection_carries_confidence_mask_and_reading_order_and_prepares_the_segment(client):
+    # Simulates what CtdComicTextDetector would return: a box, a real
+    # confidence, and a mask -- and detect_regions should OCR the segment and
+    # give it an automatic production area in the same pass, not leave that
+    # for a separate step.
+    page = import_page(client).json()
+    mask = Polygon([(70, 70), (270, 70), (270, 90), (70, 90)])
+    client.services.page_service.detector = FakeDetector([
+        DetectedRegion(BoundingBox(40, 40, 265, 95), confidence=0.87, mask=mask),
+    ])
+    client.services.page_service.ocr = TesseractOcr()
+
+    detected = client.post(f"/api/pages/{page['id']}/detect").json()
+    assert detected["created"] == 1
+    segment_id = detected["segments"][0]["id"]
+
+    region = client.get(f"/api/pages/{page['id']}").json()["regions"][0]["region"]
+    assert region["source"] == "detected"
+    assert region["confidence"] == 0.87
+
+    # OCR already ran as part of detection, not as a separate manual step.
+    view = client.get(f"/api/segments/{segment_id}").json()
+    assert "HELLO" in view["source"].upper()
+
+    stored = client.services.repository.get_segment(segment_id)
+    assert stored.region.polygon == mask
+    assert stored.region.reading_order == 0
+
+
+def test_detection_still_creates_usable_segments_without_a_mask_or_confidence(client):
+    # The OpenCV fallback path: no mask, confidence is whatever it computes.
+    # Production-area inference and OCR still run for it, same as for CTD.
+    page = import_page(client).json()
+    client.services.page_service.detector = FakeDetector([
+        DetectedRegion(BoundingBox(40, 40, 265, 95), confidence=0.5, mask=None),
+    ])
+    client.services.page_service.ocr = TesseractOcr()
+
+    detected = client.post(f"/api/pages/{page['id']}/detect").json()
+    segment_id = detected["segments"][0]["id"]
+    region = client.get(f"/api/pages/{page['id']}").json()["regions"][0]["region"]
+    assert region["source"] == "detected"
+    assert region["confidence"] == 0.5
+
+    view = client.get(f"/api/segments/{segment_id}").json()
+    assert "HELLO" in view["source"].upper()
+
+
+def test_detection_ocr_hints_the_project_default_language_before_the_pipeline_would(client):
+    # A freshly detected segment's own `language` field is None until the
+    # translation pipeline resolves it (see pipeline.py step 18) -- which
+    # hasn't run yet at the point detect_regions() OCRs it. A language-aware
+    # OCR router with no hint at all falls back to its default backend
+    # instead of the per-language one, so detect_regions() must pass the
+    # project's default language explicitly rather than leaving this to
+    # chance. Regression test for exactly that gap.
+    page = import_page(client).json()
+    client.services.page_service.detector = FakeDetector([
+        DetectedRegion(BoundingBox(40, 40, 265, 95)),
+    ])
+    client.services.page_service.ocr = OcrRouter(
+        default=NullOcr(), by_language={"ja": FakeOcr(OcrResult("うるせぇ", language="ja"))})
+
+    detected = client.post(f"/api/pages/{page['id']}/detect").json()
+    segment_id = detected["segments"][0]["id"]
+    view = client.get(f"/api/segments/{segment_id}").json()
+    assert view["source"] == "うるせぇ"
+
+
+def test_detection_assigns_a_provisional_reading_order():
+    page_id = "irrelevant"  # only exercising the ordering, not the API round trip here
+    from scanlate.imaging.detection import _simple_japanese_reading_order
+    left = DetectedRegion(BoundingBox(10, 10, 50, 50))
+    right = DetectedRegion(BoundingBox(200, 10, 50, 50))
+    assert _simple_japanese_reading_order([left, right]) == [right, left]
+
+
+def test_editing_a_detected_region_flips_its_provenance_to_manual(client):
+    page = import_page(client).json()
+    client.services.page_service.detector = FakeDetector([
+        DetectedRegion(BoundingBox(40, 40, 265, 95), confidence=0.9),
+    ])
+    detected = client.post(f"/api/pages/{page['id']}/detect").json()
+    segment_id = detected["segments"][0]["id"]
+    before = client.get(f"/api/pages/{page['id']}").json()["regions"][0]["region"]
+    assert before["source"] == "detected"
+
+    client.patch(f"/api/segments/{segment_id}/region", json={"x": 41, "y": 41, "width": 260, "height": 90})
+
+    after = client.get(f"/api/pages/{page['id']}").json()["regions"][0]["region"]
+    assert after["source"] == "manual"
+    assert after["confidence"] is None
+
+
 def test_detector_false_positives_can_be_deleted(client):
     page = import_page(client).json()
     client.services.page_service.detector = FakeDetector([
@@ -189,6 +284,84 @@ def test_zero_detected_regions_is_valid(client):
     assert manual.status_code == 200
 
 
+# --- production area ------------------------------------------------------
+def test_production_box_round_trips_through_the_api(client):
+    page = import_page(client).json()
+    segment = client.post(f"/api/pages/{page['id']}/regions",
+                          json={"x": 40, "y": 40, "width": 260, "height": 90}).json()
+
+    set_response = client.patch(f"/api/segments/{segment['id']}/production",
+                                json={"x": 30, "y": 30, "width": 300, "height": 140})
+    assert set_response.status_code == 200
+    region = client.get(f"/api/pages/{page['id']}").json()["regions"][0]["region"]
+    assert region["production_box"] == {"x": 30, "y": 30, "width": 300, "height": 140}
+    # region.box itself is untouched by setting production_box.
+    assert (region["x"], region["y"], region["width"], region["height"]) == (40, 40, 260, 90)
+
+    moved = client.patch(f"/api/segments/{segment['id']}/production",
+                         json={"x": 20, "y": 20, "width": 320, "height": 160})
+    assert moved.status_code == 200
+    region = client.get(f"/api/pages/{page['id']}").json()["regions"][0]["region"]
+    assert region["production_box"] == {"x": 20, "y": 20, "width": 320, "height": 160}
+
+    cleared = client.patch(f"/api/segments/{segment['id']}/production", json=None)
+    assert cleared.status_code == 200
+    region = client.get(f"/api/pages/{page['id']}").json()["regions"][0]["region"]
+    assert region["production_box"] is None
+
+
+def test_production_box_and_region_box_are_independent_in_both_directions(client):
+    page = import_page(client).json()
+    segment = client.post(f"/api/pages/{page['id']}/regions",
+                          json={"x": 40, "y": 40, "width": 260, "height": 90}).json()
+    client.patch(f"/api/segments/{segment['id']}/production",
+                json={"x": 30, "y": 30, "width": 300, "height": 140})
+
+    # Moving/resizing the text region never touches production_box.
+    client.patch(f"/api/segments/{segment['id']}/region",
+                json={"x": 100, "y": 200, "width": 150, "height": 60})
+    region = client.get(f"/api/pages/{page['id']}").json()["regions"][0]["region"]
+    assert (region["x"], region["y"], region["width"], region["height"]) == (100, 200, 150, 60)
+    assert region["production_box"] == {"x": 30, "y": 30, "width": 300, "height": 140}
+
+
+def test_production_box_outside_the_page_is_rejected(client):
+    page = import_page(client).json()
+    segment = client.post(f"/api/pages/{page['id']}/regions",
+                          json={"x": 40, "y": 40, "width": 260, "height": 90}).json()
+    response = client.patch(f"/api/segments/{segment['id']}/production",
+                           json={"x": 500, "y": 700, "width": 400, "height": 400})
+    assert response.status_code == 400
+    assert "outside the page" in response.json()["detail"]
+
+
+def test_production_box_survives_a_restart(client, tmp_path):
+    page = import_page(client).json()
+    segment = client.post(f"/api/pages/{page['id']}/regions",
+                          json={"x": 40, "y": 40, "width": 260, "height": 90}).json()
+    client.patch(f"/api/segments/{segment['id']}/production",
+                json={"x": 30, "y": 30, "width": 300, "height": 140})
+
+    reopened = build_services(tmp_path / "db.sqlite", media_root=tmp_path / "media")
+    with TestClient(create_app(reopened, seed=False)) as second:
+        region = second.get(f"/api/pages/{page['id']}").json()["regions"][0]["region"]
+        assert region["production_box"] == {"x": 30, "y": 30, "width": 300, "height": 140}
+
+
+def test_detaching_an_approved_region_clears_its_production_box(client):
+    page = import_page(client).json()
+    segment = client.post(f"/api/pages/{page['id']}/regions",
+                          json={"x": 40, "y": 40, "width": 260, "height": 90,
+                                "language": "ja", "source_text": "行くぞ！"}).json()
+    client.patch(f"/api/segments/{segment['id']}/production",
+                json={"x": 30, "y": 30, "width": 300, "height": 140})
+    client.post(f"/api/segments/{segment['id']}/approve", json={"translation": "Let's go!"})
+
+    client.delete(f"/api/segments/{segment['id']}/region?force=true")
+    kept = client.services.repository.get_segment(segment["id"])
+    assert kept.production_box is None
+
+
 # --- OCR ----------------------------------------------------------------
 def test_ocr_writes_source_text_onto_the_segment(client):
     # This fixture's rendered text is Latin, so it needs Tesseract
@@ -204,6 +377,21 @@ def test_ocr_writes_source_text_onto_the_segment(client):
     assert response["result"]["ok"] is True
     assert "HELLO" in response["result"]["text"].upper()
     assert response["segment"]["source"] == response["result"]["text"]
+
+
+def test_ocr_reads_only_region_box_and_ignores_production_box(client):
+    # An explicit production_box covering a blank part of the page must never
+    # redirect OCR there — OCR always reads region.box, unconditionally.
+    client.services.page_service.ocr = TesseractOcr()
+    page = import_page(client).json()
+    segment = client.post(f"/api/pages/{page['id']}/regions",
+                          json={"x": 40, "y": 40, "width": 265, "height": 95}).json()
+    client.patch(f"/api/segments/{segment['id']}/production",
+                json={"x": 40, "y": 440, "width": 200, "height": 60})  # blank strip, no text
+
+    response = client.post(f"/api/segments/{segment['id']}/ocr").json()
+    assert response["result"]["ok"] is True
+    assert "HELLO" in response["result"]["text"].upper()
 
 
 def test_ocr_failure_leaves_the_manual_workflow_available(client):
@@ -319,7 +507,8 @@ def test_page_regions_and_segments_survive_a_restart(client, tmp_path):
         region = reloaded["regions"][0]
         assert region["region"] == {"x": 37, "y": 41, "width": 263, "height": 91,
                                     "kind": "caption", "orientation": "horizontal",
-                                    "reading_order": 0}
+                                    "reading_order": 0, "production_box": None,
+                                    "source": "manual", "confidence": None}
         assert region["kind"] == "narration" and region["language"] == "ja"
 
         view = second.get(f"/api/segments/{segment['id']}").json()

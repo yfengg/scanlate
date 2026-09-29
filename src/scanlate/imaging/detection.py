@@ -15,11 +15,15 @@ No general-purpose LLM is involved in detection.
 """
 from __future__ import annotations
 
+import json
+import subprocess
+import tempfile
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
+from pathlib import Path
 
 from ..core.types import SegmentKind
-from .layout import BoundingBox
+from .layout import BoundingBox, Polygon
 
 
 class DetectorError(Exception):
@@ -38,8 +42,11 @@ class DetectorUnavailable(DetectorError):
 @dataclass
 class DetectedRegion:
     box: BoundingBox
-    confidence: float = 0.5
+    confidence: float | None = 0.5
     suggested_kind: SegmentKind = SegmentKind.DIALOGUE
+    # A text-segmentation outline in page coordinates, where the detector can
+    # produce one (see CtdComicTextDetector). None for box-only detectors.
+    mask: Polygon | None = None
     data: dict = field(default_factory=dict)
 
 
@@ -185,11 +192,122 @@ def _contains(outer: BoundingBox, inner: BoundingBox) -> bool:
             and outer.y + outer.height >= inner.y + inner.height)
 
 
+class CtdComicTextDetector(TextRegionDetector):
+    """Adapter for comic-text-detector (dmMaze/comic-text-detector, GPL-3.0),
+    a manga/comic-specific detector trained on real manga/comic data — unlike
+    ``OpenCvComicTextDetector``, it also produces a real per-region text
+    segmentation mask, not just a box.
+
+    **Out-of-process by design.** comic-text-detector's Python code is never
+    imported into, or vendored in, this process or repository. This class
+    only knows how to run an external command and parse a small JSON contract
+    it writes back — the detector itself, its weights, and its dependencies
+    live in a separate environment the operator prepares (see
+    ``tools/ctd_bridge.py`` for the bridge script and setup notes). This keeps
+    Scanlate's own process and repository free of GPL code; it does not by
+    itself resolve every licensing question a real deployment might raise, so
+    treat it as a cleaner separation for now, not a legal conclusion.
+
+    Configuration is two environment variables, not a generic pluggable
+    external-command system — this adapter is specific to comic-text-detector,
+    not a contract other detectors are expected to implement the same way:
+
+    * ``SCANLATE_CTD_PYTHON`` — the interpreter in the separate environment
+      that has comic-text-detector's dependencies installed.
+    * ``SCANLATE_CTD_SCRIPT`` — the bridge script to run with it.
+    """
+    name = "ctd"
+
+    def __init__(self, python_path: str | None = None, script_path: str | None = None,
+                 timeout: float = 60.0):
+        self.python_path = python_path
+        self.script_path = script_path
+        self.timeout = timeout
+
+    def available(self) -> bool:
+        return bool(self.python_path and self.script_path
+                    and Path(self.python_path).exists() and Path(self.script_path).exists())
+
+    def detect(self, image_bytes: bytes) -> list[DetectedRegion]:
+        if not self.available():
+            raise DetectorUnavailable(
+                "comic-text-detector isn't configured (SCANLATE_CTD_PYTHON/SCANLATE_CTD_SCRIPT).")
+        with tempfile.TemporaryDirectory(prefix="scanlate-ctd-") as tmp:
+            in_path = Path(tmp) / "page.png"
+            out_path = Path(tmp) / "result.json"
+            in_path.write_bytes(image_bytes)
+            try:
+                completed = subprocess.run(
+                    [self.python_path, self.script_path,
+                     "--input", str(in_path), "--output", str(out_path)],
+                    capture_output=True, text=True, timeout=self.timeout)
+            except subprocess.TimeoutExpired as error:
+                raise DetectorError(f"comic-text-detector timed out: {error}")
+            except OSError as error:
+                raise DetectorUnavailable(f"couldn't run comic-text-detector: {error}")
+            if completed.returncode != 0:
+                raise DetectorError(
+                    f"comic-text-detector failed (exit {completed.returncode}): "
+                    f"{completed.stderr.strip()[-500:]}")
+            try:
+                payload = json.loads(out_path.read_text(encoding="utf8"))
+            except (OSError, json.JSONDecodeError) as error:
+                raise DetectorError(f"comic-text-detector produced no readable result: {error}")
+
+        regions = []
+        for entry in payload.get("regions", []):
+            box = entry["box"]
+            mask_points = entry.get("mask_polygon")
+            regions.append(DetectedRegion(
+                box=BoundingBox(int(box["x"]), int(box["y"]), int(box["width"]), int(box["height"])),
+                confidence=(float(entry["confidence"]) if entry.get("confidence") is not None else None),
+                suggested_kind=SegmentKind.DIALOGUE,
+                mask=Polygon([(int(x), int(y)) for x, y in mask_points]) if mask_points else None,
+                data={"vertical": bool(entry.get("vertical", False))}))
+        return _simple_japanese_reading_order(regions)
+
+
+def _simple_japanese_reading_order(regions: list[DetectedRegion]) -> list[DetectedRegion]:
+    """Group into rows by vertical proximity, then order each row right to
+    left, rows top to bottom. A provisional heuristic, not panel analysis:
+    it has no notion of panel boundaries and will misorder regions that
+    straddle a row band it didn't expect. Good enough to get most ordinary,
+    roughly-aligned dialogue on a page into a sane default order; reordering
+    by hand remains available exactly as it is for any other region.
+    """
+    if not regions:
+        return regions
+    row_gap = max(1, sorted(r.box.height for r in regions)[len(regions) // 2])
+    ordered = sorted(regions, key=lambda r: r.box.y)
+    rows: list[list[DetectedRegion]] = []
+    for region in ordered:
+        if rows and region.box.y - rows[-1][-1].box.y <= row_gap:
+            rows[-1].append(region)
+        else:
+            rows.append([region])
+    result = []
+    for row in rows:
+        result.extend(sorted(row, key=lambda r: -r.box.x))
+    return result
+
+
 def build_detector(name: str | None = None) -> TextRegionDetector:
-    name = (name or "opencv").lower()
+    import os
+    name = (name or "auto").lower()
     if name in {"none", "null"}:
         return NullDetector()
     if name in {"opencv", "opencv-mser", "mser"}:
         detector = OpenCvComicTextDetector()
         return detector if detector.available() else NullDetector()
+    if name == "ctd":
+        detector = CtdComicTextDetector(os.environ.get("SCANLATE_CTD_PYTHON"),
+                                        os.environ.get("SCANLATE_CTD_SCRIPT"))
+        return detector if detector.available() else NullDetector()
+    if name == "auto":
+        ctd = CtdComicTextDetector(os.environ.get("SCANLATE_CTD_PYTHON"),
+                                   os.environ.get("SCANLATE_CTD_SCRIPT"))
+        if ctd.available():
+            return ctd
+        opencv = OpenCvComicTextDetector()
+        return opencv if opencv.available() else NullDetector()
     raise ValueError(f"Unknown detector {name!r}")

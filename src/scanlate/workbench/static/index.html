@@ -197,6 +197,11 @@
     border-radius: 50%; border: 1px solid var(--pencil); background: var(--paper);
     color: var(--pencil); font: inherit; line-height: 1; cursor: pointer; padding: 0; }
   .region .reject:hover { background: var(--pencil); color: var(--paper); }
+  .production-box { position: absolute; border: 2px dashed #2b6ee0;
+    background: rgba(43,110,224,.08); pointer-events: none; }
+  .production-box.interactive { pointer-events: auto; cursor: move; }
+  .production-box .handle { position: absolute; right: -5px; bottom: -5px; width: 11px; height: 11px;
+    background: var(--paper); border: 2px solid #2b6ee0; cursor: nwse-resize; pointer-events: auto; }
   .panel-head { display: flex; align-items: baseline; gap: 10px; margin-bottom: 10px; }
   .panel-head h3 { margin: 0; }
   .navbtns { margin-left: auto; display: flex; gap: 4px; }
@@ -729,7 +734,7 @@ async function openProject(projectId) {
   state.tab = "page";
   state.glossaryList = null; state.memoryList = null;
   page.id = null; page.list = null; page.data = null; page.selected = null;
-  page.preview = false; page.previewReport = null;
+  page.preview = false; page.previewReport = null; page.drawingProduction = false;
   await load();
 }
 
@@ -765,7 +770,7 @@ document.addEventListener("keydown", e => {
 // ---------------------------------------------------------------------
 const page = { id: null, data: null, scale: 1, fit: true, selected: null, mode: "select",
                busy: false, note: null, chapterId: null, chapters: [], pendingSource: null,
-               preview: false, previewReport: null };
+               preview: false, previewReport: null, drawingProduction: false };
 
 const KINDS = ["dialogue", "thought", "narration", "sfx", "sign", "other"];
 const LANGUAGES = [["", "auto"], ["ja", "Japanese"], ["ko", "Korean"], ["en", "English"]];
@@ -904,10 +909,24 @@ function stageHTML() {
           <span class="handle" data-resize="${esc(r.segment_id)}"></span>` : ""}
       </div>`;
   }).join("");
-  return `<div class="canvas-stage ${page.mode === "draw" ? "drawmode" : ""}" id="stage"
+  // The production area only ever shows for the region being worked on, and
+  // only when one is actually set — most regions still use the legacy
+  // auto-inset and have nothing to show here.
+  const selectedRegion = (page.data.regions || []).find(r => r.segment_id === page.selected);
+  const productionBox = (selectedRegion && selectedRegion.region.production_box) ? (() => {
+    const b = selectedRegion.region.production_box;
+    return `<div class="production-box interactive" data-production="${esc(page.selected)}"
+        title="Production area: cleanup and translated text stay inside this box"
+        style="left:${toScreen(b.x)}px; top:${toScreen(b.y)}px;
+               width:${toScreen(b.width)}px; height:${toScreen(b.height)}px">
+        <span class="handle" data-resize-production="${esc(page.selected)}"></span>
+      </div>`;
+  })() : "";
+  return `<div class="canvas-stage ${page.mode === "draw" || page.drawingProduction ? "drawmode" : ""}" id="stage"
       style="width:${w}px; height:${h}px">
       <img src="${API}/api/pages/${esc(page.data.id)}/image" alt="Page ${page.data.number}" draggable="false">
       ${regions}
+      ${productionBox}
     </div>`;
 }
 
@@ -983,6 +1002,27 @@ function panelHTML(segment) {
             <option value="vertical_rl" ${region && region.region.orientation === "vertical_rl" ? "selected" : ""}>vertically</option>
           </select></div>
       </details>
+
+      ${segment.kind !== "sfx" ? productionAreaHTML(region) : ""}
+    </div>`;
+}
+
+// SFX is never cleaned or typeset into a production area (see
+// PageRenderer._render_sfx) — the control isn't offered for it at all,
+// rather than offering a setting that would silently do nothing.
+function productionAreaHTML(region) {
+  const box = region && region.region.production_box;
+  return `
+    <div class="region-settings">
+      <label class="label">Production area</label>
+      <p class="hint">${box
+        ? "Cleanup and translated text stay inside this box."
+        : "Not set — cleanup and layout default to a safe inset of the source box."}</p>
+      <div class="rowbtns">
+        <button class="quiet" data-page="production-draw" ${page.busy ? "disabled" : ""}>
+          ${box ? "Redraw" : "Draw production area"}</button>
+        ${box ? `<button class="quiet danger" data-page="production-clear">Clear</button>` : ""}
+      </div>
     </div>`;
 }
 
@@ -1061,6 +1101,7 @@ function stepRegion(delta) {
 function selectSegment(segmentId) {
   page.selected = segmentId;
   page.note = null;
+  page.drawingProduction = false;
   const index = state.data.segments.findIndex(s => s.id === segmentId);
   if (index >= 0) state.focus = index;
   render();
@@ -1091,7 +1132,7 @@ async function pageAction(action, element) {
     if (action === "tool-draw") { page.mode = "draw"; render(); return; }
     if (action === "mode-edit") { page.preview = false; page.previewReport = null; render(); return; }
     if (action === "mode-preview") {
-      page.busy = true; page.preview = true; page.selected = null; render();
+      page.busy = true; page.preview = true; page.selected = null; page.drawingProduction = false; render();
       try {
         page.previewReport = await request(`/api/pages/${page.id}/preview`);
       } catch (error) {
@@ -1156,6 +1197,12 @@ async function pageAction(action, element) {
       const result = await request(`/api/segments/${selected}/source`, "PATCH",
                                    { source_text: text, language });
       page.note = result.reopened ? { level: "warn", text: result.message } : null;
+      await refreshPage();
+      return;
+    }
+    if (action === "production-draw") { page.drawingProduction = true; render(); return; }
+    if (action === "production-clear") {
+      await request(`/api/segments/${selected}/production`, "PATCH", null);
       await refreshPage();
       return;
     }
@@ -1263,23 +1310,44 @@ document.addEventListener("mousedown", e => {
   const rect = stage.getBoundingClientRect();
   const at = { x: toImage(e.clientX - rect.left), y: toImage(e.clientY - rect.top) };
 
+  const productionHandle = e.target.closest("[data-resize-production]");
+  if (productionHandle) {
+    const region = page.data.regions.find(r => r.segment_id === productionHandle.dataset.resizeProduction);
+    drag = { type: "resize", target: "production", id: productionHandle.dataset.resizeProduction,
+             box: { ...region.region.production_box }, at };
+    e.preventDefault();
+    return;
+  }
   const handle = e.target.closest("[data-resize]");
   if (handle) {
     const region = page.data.regions.find(r => r.segment_id === handle.dataset.resize);
-    drag = { type: "resize", id: handle.dataset.resize, box: { ...region.region }, at };
+    drag = { type: "resize", target: "region", id: handle.dataset.resize, box: { ...region.region }, at };
+    e.preventDefault();
+    return;
+  }
+  const productionBox = e.target.closest(".production-box");
+  if (productionBox && !page.drawingProduction) {
+    const region = page.data.regions.find(r => r.segment_id === productionBox.dataset.production);
+    drag = { type: "move", target: "production", id: productionBox.dataset.production,
+             box: { ...region.region.production_box }, at };
     e.preventDefault();
     return;
   }
   const box = e.target.closest(".region");
-  if (box && page.mode !== "draw") {
+  if (box && page.mode !== "draw" && !page.drawingProduction) {
     selectSegment(box.dataset.segment);
     const region = page.data.regions.find(r => r.segment_id === box.dataset.segment);
-    drag = { type: "move", id: box.dataset.segment, box: { ...region.region }, at };
+    drag = { type: "move", target: "region", id: box.dataset.segment, box: { ...region.region }, at };
+    e.preventDefault();
+    return;
+  }
+  if (page.drawingProduction && page.selected) {
+    drag = { type: "draw", target: "production", id: page.selected, start: at, at };
     e.preventDefault();
     return;
   }
   if (page.mode === "draw") {
-    drag = { type: "draw", start: at, at };
+    drag = { type: "draw", target: "region", start: at, at };
     e.preventDefault();
   }
 });
@@ -1296,7 +1364,9 @@ document.addEventListener("mousemove", e => {
   const preview = drag.type === "draw"
     ? (document.querySelector(".drawing") || stage.appendChild(Object.assign(
         document.createElement("div"), { className: "drawing" })))
-    : stage.querySelector(`.region[data-segment="${drag.id}"]`);
+    : drag.target === "production"
+      ? stage.querySelector(`.production-box[data-production="${drag.id}"]`)
+      : stage.querySelector(`.region[data-segment="${drag.id}"]`);
   if (!preview) return;
   preview.style.left = toScreen(box.x) + "px";
   preview.style.top = toScreen(box.y) + "px";
@@ -1334,6 +1404,13 @@ document.addEventListener("mouseup", async () => {
   geometry.height = Math.max(1, Math.min(geometry.height, page.data.height - geometry.y));
 
   try {
+    if (finished.type === "draw" && finished.target === "production") {
+      page.drawingProduction = false;                 // one-shot, whether or not this succeeds
+      if (geometry.width < 6 || geometry.height < 6) { render(); return; }
+      await request(`/api/segments/${finished.id}/production`, "PATCH", geometry);
+      await refreshPage();
+      return;
+    }
     if (finished.type === "draw") {
       if (geometry.width < 6 || geometry.height < 6) { render(); return; }
       const created = await request(`/api/pages/${page.id}/regions`, "POST",
@@ -1347,7 +1424,8 @@ document.addEventListener("mouseup", async () => {
     const unchanged = geometry.x === finished.box.x && geometry.y === finished.box.y
       && geometry.width === finished.box.width && geometry.height === finished.box.height;
     if (unchanged) return;
-    await request(`/api/segments/${finished.id}/region`, "PATCH", geometry);
+    const endpoint = finished.target === "production" ? "production" : "region";
+    await request(`/api/segments/${finished.id}/${endpoint}`, "PATCH", geometry);
     await refreshPage();
   } catch (error) { fail(error); render(); }
 });
@@ -1511,13 +1589,13 @@ document.getElementById("view").addEventListener("change", e => {
   if (e.target.id === "chapter-picker") {
     page.chapterId = e.target.value || null;
     page.id = null; page.selected = null; page.note = null; page.list = null;
-    page.preview = false; page.previewReport = null;
+    page.preview = false; page.previewReport = null; page.drawingProduction = false;
     loadPages().then(render).catch(fail);
     return;
   }
   if (e.target.id === "page-picker") {
     page.id = e.target.value; page.selected = null; page.fit = true; page.note = null;
-    page.preview = false; page.previewReport = null;
+    page.preview = false; page.previewReport = null; page.drawingProduction = false;
     request(`/api/pages/${page.id}`).then(data => { page.data = data; render(); }).catch(fail);
     return;
   }
@@ -1565,6 +1643,7 @@ document.addEventListener("keydown", e => {
   // Escape backs out of drawing, then out of the selection.
   if (e.key === "Escape" && state.tab === "page" && !typing) {
     if (drag && drag.type === "draw") { drag = null; document.querySelector(".drawing")?.remove(); }
+    if (page.drawingProduction) { page.drawingProduction = false; render(); return; }
     if (page.mode === "draw") { page.mode = "select"; render(); return; }
     if (page.selected) { page.selected = null; render(); }
     return;

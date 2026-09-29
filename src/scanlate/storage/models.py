@@ -20,7 +20,7 @@ from dataclasses import dataclass, field
 from enum import Enum
 
 from ..core.types import SegmentKind
-from ..imaging.layout import Region, RenderSettings
+from ..imaging.layout import BoundingBox, Region, RenderSettings
 
 
 class Status(str, Enum):
@@ -86,6 +86,12 @@ class Segment:
     region: Region | None = None
     render: RenderSettings | None = None
     mask_ref: str | None = None
+    # The explicit area allowed to be modified for page production (cleanup
+    # fill + translated-text layout). None means "no explicit area yet" —
+    # rendering falls back to the legacy auto-inset of ``region.box``.
+    # Independent of ``region``: OCR/selection geometry never changes when
+    # this does, and vice versa. See imaging/cleanup.py, imaging/render.py.
+    production_box: BoundingBox | None = None
 
     def resolved_language(self, project_default: str) -> str:
         return self.language or project_default

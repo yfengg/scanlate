@@ -9,6 +9,7 @@ from __future__ import annotations
 from typing import Any
 
 from ..glossary.store import GlossaryEntry
+from ..imaging.layout import box_to_dict
 from ..memory.store import MemoryEntry
 from ..pipeline.approval import GlossarySuggestion
 from ..storage.models import Chapter, Page, Project, Segment
@@ -137,6 +138,9 @@ def region(segment: Segment) -> dict | None:
         "kind": segment.region.kind.value,
         "orientation": segment.region.orientation.value,
         "reading_order": segment.region.reading_order,
+        "production_box": box_to_dict(segment.production_box),
+        "source": segment.region.source.value,
+        "confidence": segment.region.confidence,
     }
 
 

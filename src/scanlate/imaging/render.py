@@ -13,7 +13,7 @@ from dataclasses import dataclass, field, replace
 from PIL import Image, ImageDraw
 
 from .cleanup import BubbleCleaner, CleanupResult
-from .layout import BoundingBox, RegionKind, RenderSettings
+from .layout import BoundingBox, Polygon, RegionKind, RenderSettings
 from .typeset import LayoutResult, TextLayoutEngine, load_font
 
 # A caption is deliberately small and fixed-size — it is a label next to the
@@ -28,13 +28,26 @@ TEXT_COLOR = (17, 17, 17)
 class RenderableRegion:
     """Everything the renderer needs for one region, assembled by the caller
     from a ``Segment`` and its approved candidate — this module never touches
-    storage models directly."""
+    storage models directly.
+
+    ``box`` is always the source/OCR/selection geometry (``region.box``) and
+    is never used as a cleanup or typeset target on its own.
+    ``production_box``, when set, is the explicit area allowed to be
+    modified: both cleanup and translated-text layout use it exclusively.
+    When absent, cleanup derives its own (smaller) inset from ``box`` and
+    typesets into that same inset — the legacy path, unchanged.
+    """
     segment_id: str
     kind: RegionKind
     box: BoundingBox
     text: str
     render: RenderSettings
     target_language: str
+    production_box: BoundingBox | None = None
+    # A detector's real text-segmentation outline (page coordinates), when
+    # available. Takes precedence over both cleanup estimates — see
+    # BubbleCleaner.inspect. Never used for SFX (see _render_sfx).
+    mask: Polygon | None = None
 
 
 @dataclass
@@ -79,11 +92,20 @@ class PageRenderer:
         return out, report
 
     def _render_bubble(self, image: Image.Image, region: RenderableRegion) -> RegionRenderResult:
-        cleanup = self.cleaner.inspect(image, region.box)
+        # An explicit production area is the whole story for both steps: no
+        # inference, no shrinking on top of a manual selection. Absent one,
+        # fall back to the legacy auto-inset of the source/OCR box.
+        target_box = region.production_box if region.production_box is not None else region.box
+        cleanup = self.cleaner.inspect(image, target_box, apply_inset=region.production_box is None,
+                                       mask=region.mask)
         if not cleanup.ok:
             return RegionRenderResult(region.segment_id, region.kind, False, cleanup.reason, cleanup, None)
 
-        layout = self.typesetter.layout(region.text, cleanup.cleaned_box, region.render,
+        # The box that was actually inspected and will be filled is also the
+        # only box typesetting is allowed to use — this is what guarantees
+        # drawn text can never land outside the area that was checked safe.
+        layout_box = cleanup.cleaned_box
+        layout = self.typesetter.layout(region.text, layout_box, region.render,
                                         region.target_language)
         if not layout.fits:
             reason = layout.reason or "translation does not fit the region"
@@ -94,7 +116,7 @@ class PageRenderer:
         # half-cleaned.
         self.cleaner.apply(image, cleanup)
         applied = replace(region.render, font_size=layout.font_size)
-        _draw_lines(image, cleanup.cleaned_box, layout, applied)
+        _draw_lines(image, layout_box, layout, applied)
         return RegionRenderResult(region.segment_id, region.kind, True, None, cleanup, layout, applied)
 
     def _render_sfx(self, image: Image.Image, region: RenderableRegion) -> RegionRenderResult:
@@ -120,9 +142,24 @@ def _caption_box(box: BoundingBox, image_w: int, image_h: int) -> BoundingBox:
 
 def _draw_lines(image: Image.Image, box: BoundingBox, layout: LayoutResult,
                 render: RenderSettings, stroke: bool = False) -> None:
+    """Draw ``layout``'s lines inside ``box``.
+
+    Structurally clipped: draws onto a crop of exactly ``box``, in
+    coordinates local to that crop, then pastes the crop back. A wrong
+    coordinate, an oversized font, or a line wider than the box can at worst
+    be cut off within the crop — it cannot reach a page pixel outside
+    ``box``, regardless of any arithmetic mistake in the layout above.
+    """
+    patch = image.crop((box.x, box.y, box.x + box.width, box.y + box.height))
+    _draw_lines_onto(patch, BoundingBox(0, 0, box.width, box.height), layout, render, stroke)
+    image.paste(patch, (box.x, box.y))
+
+
+def _draw_lines_onto(patch: Image.Image, box: BoundingBox, layout: LayoutResult,
+                     render: RenderSettings, stroke: bool = False) -> None:
     pad_l, pad_t, pad_r, pad_b = render.padding
     font = load_font(render.font_id, layout.font_size)
-    draw = ImageDraw.Draw(image)
+    draw = ImageDraw.Draw(patch)
     available_w = box.width - pad_l - pad_r
     y = box.y + pad_t
     for line in layout.lines:

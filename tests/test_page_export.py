@@ -103,6 +103,40 @@ def test_preview_flags_a_region_that_still_has_visible_text(client):
     assert report["flagged"][0]["reason"]
 
 
+# --- production area --------------------------------------------------------
+def test_explicit_production_box_rescues_a_region_the_bare_ocr_box_would_flag(client):
+    page = import_page(client).json()
+    region = create_region(client, page["id"], BUBBLE_WITH_TEXT)
+    approve(client, region["id"], "Hi there!")
+
+    # Without a production_box, the tight OCR box (bubble outline + "HELLO
+    # THERE" text) is flagged, as established above.
+    flagged = client.get(f"/api/pages/{page['id']}/preview").json()
+    assert len(flagged["flagged"]) == 1
+
+    # A blank strip inside the same bubble, clear of both the border and the
+    # text, gives the renderer a safe area to clean and typeset into.
+    client.patch(f"/api/segments/{region['id']}/production",
+                json={"x": 200, "y": 100, "width": 90, "height": 20})
+
+    report = client.get(f"/api/pages/{page['id']}/preview").json()
+    assert report["flagged"] == []
+    assert any(r["segment_id"] == region["id"] and r["rendered"] for r in report["results"])
+
+
+def test_clearing_production_box_returns_to_the_flagged_legacy_result(client):
+    page = import_page(client).json()
+    region = create_region(client, page["id"], BUBBLE_WITH_TEXT)
+    approve(client, region["id"], "Hi there!")
+    client.patch(f"/api/segments/{region['id']}/production",
+                json={"x": 200, "y": 100, "width": 90, "height": 20})
+    assert client.get(f"/api/pages/{page['id']}/preview").json()["flagged"] == []
+
+    client.patch(f"/api/segments/{region['id']}/production", json=None)
+    report = client.get(f"/api/pages/{page['id']}/preview").json()
+    assert len(report["flagged"]) == 1
+
+
 def test_only_approved_segments_are_rendered(client):
     page = import_page(client).json()
     approved = create_region(client, page["id"], BLANK_AREA)

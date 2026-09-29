@@ -37,8 +37,10 @@ from ..storage.repository import ProjectRepository
 from ..storage.unit_of_work import UnitOfWork
 from .detection import DetectorError, DetectorUnavailable, TextRegionDetector
 from .importer import ImageError, MediaStore
-from .layout import BoundingBox, Region, RegionKind, RenderSettings, TextOrientation
+from .layout import (BoundingBox, Polygon, Region, RegionKind, RegionSource, RenderSettings,
+                     TextOrientation)
 from .ocr import OcrBackend, OcrError, OcrResult
+from .production_area import infer_production_area
 from .render import PageRenderer, RenderableRegion, RenderReport
 
 REGION_KIND_FOR_SEGMENT = {
@@ -124,16 +126,23 @@ class PageService:
     # --- regions -------------------------------------------------------
     def create_region(self, page_id: str, box: BoundingBox, kind: SegmentKind = SegmentKind.OTHER,
                       language: str | None = None, source_text: str = "",
-                      segment_id: str | None = None) -> Segment:
-        """Draw a region by hand. Always available, detector or not."""
+                      segment_id: str | None = None, source: RegionSource = RegionSource.MANUAL,
+                      confidence: float | None = None, mask: Polygon | None = None,
+                      reading_order: int = 0) -> Segment:
+        """Draw a region by hand, or materialize one from a detector's
+        output. Always available, detector or not — manual drawing never
+        depends on ``source``/``confidence``/``mask``, which only a detector
+        supplies (see ``detect_regions``)."""
         page = self._page(page_id)
         self._validate(box, page.width, page.height)
+        region = self._region(box, kind, language or self._default_language(page))
+        region.source, region.confidence, region.polygon = source, confidence, mask
+        region.reading_order = reading_order
         segment = Segment(
             id=segment_id or f"seg-{uuid.uuid4().hex[:10]}",
             project_id=page.project_id, seq=self.repository.next_seq(page.project_id),
             kind=SegmentKind(kind), source_text=source_text, language=language,
-            page_id=page_id,
-            region=self._region(box, kind, language or self._default_language(page)))
+            page_id=page_id, region=region)
         with self.uow.transaction():
             self.repository.add_segment(segment)
         return self.repository.get_segment(segment.id)
@@ -141,7 +150,17 @@ class PageService:
     def update_region(self, segment_id: str, box: BoundingBox | None = None,
                       kind: SegmentKind | None = None, language: str | None = None,
                       orientation: TextOrientation | None = None) -> Segment:
-        """Move, resize, retype, relabel or reorient a region."""
+        """Move, resize, retype, relabel or reorient a region.
+
+        Every branch here rebuilds the region via ``_region()``, which always
+        constructs a fresh, plain ``Region`` — so touching geometry, kind, or
+        orientation always leaves ``source`` at its default, MANUAL. That is
+        deliberate: a detector's mask and confidence describe *its* box, not
+        whatever a human has since drawn there, so an edit correctly drops
+        both (see ``_region``) and marks the region as no longer an
+        unreviewed proposal. A pure language change touches none of this and
+        leaves geometry/provenance untouched entirely.
+        """
         segment = self._segment(segment_id)
         with self.uow.transaction():
             if box is not None:
@@ -155,14 +174,17 @@ class PageService:
                     region.orientation = orientation
                 elif segment.region is not None:
                     region.orientation = segment.region.orientation
+                if segment.region is not None:
+                    region.reading_order = segment.region.reading_order
                 self.repository.set_region(segment_id, region)
             if kind is not None:
                 self.repository.set_kind(segment_id, SegmentKind(kind))
                 if box is None and segment.region is not None:
                     # Changing the type must not silently reset the orientation
-                    # the user chose.
+                    # or reading position the user (or a detector) already set.
                     region = self._region(segment.region.box, kind, segment.language)
                     region.orientation = segment.region.orientation
+                    region.reading_order = segment.region.reading_order
                     self.repository.set_region(segment_id, region)
             if language is not None and language != segment.language:
                 # Not a plain field update: changing the language changes which
@@ -173,6 +195,7 @@ class PageService:
                 if current.region is not None:
                     region = self._region(current.region.box, current.kind)
                     region.orientation = orientation
+                    region.reading_order = current.region.reading_order
                     self.repository.set_region(segment_id, region)
         return self.repository.get_segment(segment_id)
 
@@ -190,6 +213,23 @@ class PageService:
                 return "detached"
             self.repository.delete_segment(segment_id)
         return "deleted"
+
+    # --- production area -------------------------------------------------
+    def set_production_box(self, segment_id: str, box: BoundingBox | None) -> Segment:
+        """Set or clear the explicit page-production area.
+
+        Independent of the text region in both directions: this never
+        touches ``region``/OCR geometry, and moving or resizing the text
+        region (``update_region``) never touches this. ``box=None`` clears
+        it, restoring the legacy auto-inset render path for this segment.
+        """
+        segment = self._segment(segment_id)
+        if box is not None:
+            page = self._page(segment.page_id) if segment.page_id else None
+            self._validate(box, page.width if page else None, page.height if page else None)
+        with self.uow.transaction():
+            self.repository.set_production_box(segment_id, box)
+        return self.repository.get_segment(segment_id)
 
     # --- detection -----------------------------------------------------
     def detect_regions(self, page_id: str, replace: bool = False) -> DetectionResult:
@@ -222,15 +262,60 @@ class PageService:
             # because neither existed when the run started.
             taken = [s.region.box for s in self.repository.list_page_segments(page_id)
                      if s.region and s.region.box]
+            order = 0
             for region in detected:
                 if any(_overlaps(region.box, box) for box in taken):
                     continue
                 taken.append(region.box)
-                created.append(self.create_region(page_id, region.box,
-                                                  kind=region.suggested_kind,
-                                                  language=None))
+                created.append(self.create_region(
+                    page_id, region.box, kind=region.suggested_kind, language=None,
+                    source=RegionSource.DETECTED, confidence=region.confidence,
+                    mask=region.mask, reading_order=order))
+                order += 1
+
+        if created:
+            # Outside the region-creation transaction: OCR and production-area
+            # inference both do real work (recognition, pixel sampling) that
+            # has no business holding a DB transaction open across a whole
+            # page's worth of regions. Each helper below owns its own,
+            # already-transactional write.
+            page_image = Image.open(BytesIO(image))
+            for segment in created:
+                self._prepare_detected_segment(segment, page, page_image)
+
         message = None if created else "No text regions were found. Draw them by hand."
         return DetectionResult(created, available=True, message=message)
+
+    def _prepare_detected_segment(self, segment: Segment, page, page_image: Image.Image) -> None:
+        """OCR a freshly detected region and, if a safe surrounding area can
+        be found, give it an automatic production area too. Mirrors
+        ``ocr_page``'s rule: one region's failure never stops the rest of the
+        page. A region left with empty source text or no production area is
+        exactly as usable as a freshly hand-drawn one — nothing here is a
+        precondition for translating or approving it.
+        """
+        try:
+            # A freshly detected segment's own ``language`` is None until the
+            # translation pipeline first resolves it (see pipeline.py, step
+            # 18) — which hasn't happened yet at this point. Without an
+            # explicit hint here, OcrRouter has nothing to route "ja" text to
+            # and falls back to its default backend. Pass the project's
+            # default language explicitly so OCR gets the same hint the
+            # pipeline would eventually resolve to, instead of silently
+            # landing on the wrong (or no) backend for this one call.
+            self.ocr_segment(segment.id, language=self._default_language(page))
+        except Exception:
+            pass
+        box = segment.region.box if segment.region else None
+        if box is None:
+            return
+        try:
+            result = infer_production_area(page_image, box, page.width, page.height,
+                                           mask=segment.region.polygon)
+        except Exception:
+            return
+        if result.ok and result.box is not None:
+            self.set_production_box(segment.id, result.box)
 
     # --- OCR -----------------------------------------------------------
     def ocr_segment(self, segment_id: str, language: str | None = None) -> RegionOcr:
@@ -368,7 +453,8 @@ class PageService:
             regions.append(RenderableRegion(
                 segment.id, segment.region.kind, segment.region.box,
                 segment.state.candidate or "", segment.render or RenderSettings(),
-                target_language))
+                target_language, production_box=segment.production_box,
+                mask=segment.region.polygon))
         return regions
 
     def _persist_applied_render(self, report: RenderReport) -> None:

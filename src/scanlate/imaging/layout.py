@@ -25,6 +25,17 @@ class TextOrientation(str, Enum):
     VERTICAL_RL = "vertical_rl"      # Japanese vertical setting, right to left
 
 
+class RegionSource(str, Enum):
+    """Provenance of a region's geometry/text, independent of translation
+    Status/Origin. This is provenance only, not a review gate: a DETECTED
+    region's translation is generated exactly like a MANUAL one's, and
+    nothing blocks on a human looking at it first. Editing a region's
+    geometry (see PageService.update_region) flips this to MANUAL — there is
+    no separate "confirm" action."""
+    MANUAL = "manual"
+    DETECTED = "detected"
+
+
 @dataclass(frozen=True)
 class BoundingBox:
     x: int
@@ -49,9 +60,17 @@ class Polygon:
 class Region:
     kind: RegionKind = RegionKind.SPEECH_BUBBLE
     box: BoundingBox | None = None
+    # A detector's text-segmentation outline, in page coordinates, where one
+    # was provided (see imaging/detection.py::DetectedRegion.mask). Used by
+    # BubbleCleaner as ground truth for the foreground/background split when
+    # present; None for manual regions and for detectors that only draw boxes.
     polygon: Polygon | None = None
     reading_order: int = 0
     orientation: TextOrientation = TextOrientation.HORIZONTAL
+    source: RegionSource = RegionSource.MANUAL
+    # The detector's box confidence, when it provides one. None for manual
+    # regions and for detectors/wrappers that don't surface a real score.
+    confidence: float | None = None
 
 
 @dataclass
@@ -95,6 +114,8 @@ def region_to_dict(region: Region | None) -> dict | None:
         "polygon": [[int(x), int(y)] for x, y in region.polygon.points] if region.polygon else None,
         "reading_order": region.reading_order,
         "orientation": region.orientation.value,
+        "source": region.source.value,
+        "confidence": region.confidence,
     }
 
 
@@ -102,12 +123,15 @@ def region_from_dict(data: dict | None) -> Region | None:
     if not data:
         return None
     polygon = data.get("polygon")
+    confidence = data.get("confidence")
     return Region(
         kind=RegionKind(data.get("kind", RegionKind.SPEECH_BUBBLE.value)),
         box=box_from_dict(data.get("box")),
         polygon=Polygon([(int(x), int(y)) for x, y in polygon]) if polygon else None,
         reading_order=int(data.get("reading_order", 0)),
         orientation=TextOrientation(data.get("orientation", TextOrientation.HORIZONTAL.value)),
+        source=RegionSource(data.get("source", RegionSource.MANUAL.value)),
+        confidence=float(confidence) if confidence is not None else None,
     )
 
 

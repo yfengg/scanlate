@@ -788,6 +788,152 @@ async function pagePanelApprove() {
      "the Approve button is replaced by Reopen once approved");
 }
 
+// --- 8c. Page panel production area --------------------------------------
+const PRODUCTION_BOX = { x: 30, y: 50, width: 230, height: 140 };
+const PAGE_WITH_PRODUCTION = { ...PAGE_FIXTURE,
+  regions: [{ ...PAGE_FIXTURE.regions[0],
+              region: { ...PAGE_FIXTURE.regions[0].region, production_box: PRODUCTION_BOX } }] };
+
+function selectRegion(document, window) {
+  document.querySelector('.region[data-segment="s1"]').dispatchEvent(
+    new window.MouseEvent("mousedown", { bubbles: true, clientX: 50, clientY: 70 }));
+  document.dispatchEvent(new window.MouseEvent("mouseup", { bubbles: true }));
+}
+
+async function pageProductionAreaDraw() {
+  console.log("page production area: draw");
+  const calls = [];
+  const { window, document, errors } = await openPageTab(pageFetch(calls, {
+    "/production": () => json(SEGMENT),
+  }));
+  selectRegion(document, window);
+  await settle(60);
+
+  ok(document.querySelector('button[data-page="production-draw"]'),
+     "the panel offers a production-area control for a non-SFX region");
+  ok(document.querySelector('button[data-page="production-draw"]').textContent.includes("Draw"),
+     "an unset production area offers to draw one");
+  ok(!document.querySelector(".production-box"), "no overlay while none is set");
+
+  document.querySelector('button[data-page="production-draw"]').click();
+  await settle(30);
+  ok(document.querySelector(".canvas-stage.drawmode"),
+     "drawing a production area turns on draw mode");
+
+  const stage = document.getElementById("stage");
+  stage.getBoundingClientRect = () => ({ left: 0, top: 0, width: 500, height: 700 });
+  stage.dispatchEvent(new window.MouseEvent("mousedown", { bubbles: true, clientX: 30, clientY: 50 }));
+  document.dispatchEvent(new window.MouseEvent("mousemove", { bubbles: true, clientX: 260, clientY: 190 }));
+  document.dispatchEvent(new window.MouseEvent("mouseup", { bubbles: true }));
+  await settle(80);
+
+  const patch = calls.find(c => c.method === "PATCH" && c.url.includes("/production"));
+  ok(patch, "drawing a production area PATCHes .../production");
+  ok(!calls.some(c => c.method === "PATCH" && c.url.endsWith("/region")),
+     "drawing a production area never PATCHes /region");
+  if (patch) {
+    const body = JSON.parse(patch.body);
+    ok(body.x === 30 && body.y === 50 && body.width === 230 && body.height === 140,
+       `posts image coordinates (${JSON.stringify(body)})`);
+  }
+  ok(errors.length === 0, `drawing a production area throws nothing (${errors.map(String)})`);
+}
+
+async function pageProductionAreaMoveAndResize() {
+  console.log("page production area: move and resize");
+  const calls = [];
+  const { window, document, errors } = await openPageTab(pageFetch(calls, {
+    "/api/pages/pg1": () => json(PAGE_WITH_PRODUCTION),
+    "/production": () => json(SEGMENT),
+  }));
+  selectRegion(document, window);
+  await settle(60);
+
+  const overlay = document.querySelector('.production-box[data-production="s1"]');
+  ok(overlay, "an already-set production area renders its own overlay");
+  ok(document.querySelector('button[data-page="production-draw"]').textContent.includes("Redraw"),
+     "a set production area offers to redraw it");
+  ok(document.querySelector('button[data-page="production-clear"]'),
+     "a set production area offers Clear");
+
+  // Moving the box itself: mousedown on the overlay, drag, mouseup.
+  const stage = document.getElementById("stage");
+  stage.getBoundingClientRect = () => ({ left: 0, top: 0, width: 500, height: 700 });
+  overlay.dispatchEvent(new window.MouseEvent("mousedown", { bubbles: true, clientX: 60, clientY: 80 }));
+  document.dispatchEvent(new window.MouseEvent("mousemove", { bubbles: true, clientX: 90, clientY: 110 }));
+  document.dispatchEvent(new window.MouseEvent("mouseup", { bubbles: true }));
+  await settle(80);
+
+  const moved = calls.find(c => c.method === "PATCH" && c.url.includes("/production"));
+  ok(moved, "moving the production overlay PATCHes .../production, not /region");
+  if (moved) {
+    const body = JSON.parse(moved.body);
+    ok(body.x === 60 && body.y === 80 && body.width === 230 && body.height === 140,
+       `moves without resizing (${JSON.stringify(body)})`);
+  }
+
+  // Resizing via its own handle, independent of the text region's handle.
+  calls.length = 0;
+  const handle = document.querySelector('[data-resize-production="s1"]');
+  ok(handle, "the production overlay has its own resize handle");
+  handle.dispatchEvent(new window.MouseEvent("mousedown", { bubbles: true, clientX: 260, clientY: 190 }));
+  document.dispatchEvent(new window.MouseEvent("mousemove", { bubbles: true, clientX: 300, clientY: 230 }));
+  document.dispatchEvent(new window.MouseEvent("mouseup", { bubbles: true }));
+  await settle(80);
+
+  const resized = calls.find(c => c.method === "PATCH" && c.url.includes("/production"));
+  ok(resized, "resizing via the production handle PATCHes .../production");
+  if (resized) {
+    const body = JSON.parse(resized.body);
+    ok(body.width === 270 && body.height === 180,
+       `grows from the handle without moving the origin (${JSON.stringify(body)})`);
+  }
+  ok(!calls.some(c => c.method === "PATCH" && c.url.endsWith("/region")),
+     "resizing the production area never PATCHes /region");
+  ok(errors.length === 0,
+     `moving/resizing the production area throws nothing (${errors.map(String)})`);
+}
+
+async function pageProductionAreaClear() {
+  console.log("page production area: clear");
+  const calls = [];
+  const { window, document, errors } = await openPageTab(pageFetch(calls, {
+    "/api/pages/pg1": (url, options) => (options.method === "PATCH"
+      ? json(SEGMENT) : json(PAGE_WITH_PRODUCTION)),
+    "/production": () => json(SEGMENT),
+  }));
+  selectRegion(document, window);
+  await settle(60);
+
+  ok(document.querySelector(".production-box"), "the production overlay is present before clearing");
+
+  document.querySelector('button[data-page="production-clear"]').click();
+  await settle(80);
+
+  const cleared = calls.find(c => c.method === "PATCH" && c.url.includes("/production"));
+  ok(cleared, "Clear PATCHes .../production");
+  ok(cleared && cleared.body === "null", "Clear sends a literal JSON null body rather than an empty box");
+  ok(errors.length === 0, `clearing the production area throws nothing (${errors.map(String)})`);
+}
+
+async function pageProductionAreaNotOfferedForSfx() {
+  console.log("page production area: not offered for SFX");
+  const calls = [];
+  const sfxSegment = { ...SEGMENT, kind: "sfx" };
+  const { window, document, errors } = await openPageTab(pageFetch(calls, {
+    "/api/projects/demo/segments": () => json({ project: PROJECT.project, segments: [sfxSegment] }),
+    "/api/segments/": () => json(sfxSegment),
+  }));
+  selectRegion(document, window);
+  await settle(60);
+
+  ok(!document.querySelector('button[data-page="production-draw"]'),
+     "an SFX region is never offered the production-area control");
+  ok(!document.querySelector('button[data-page="production-clear"]'),
+     "an SFX region is never offered Clear either");
+  ok(errors.length === 0, `SFX panel throws nothing (${errors.map(String)})`);
+}
+
 // --- 9. chapters --------------------------------------------------------
 const CHAPTERS = [{ id: "ch1", number: 1, title: "One" }, { id: "ch2", number: 2, title: "Two" }];
 const PAGE_CH2 = { ...PAGE_FIXTURE, id: "pg2", chapter_id: "ch2", number: 1, regions: [] };
@@ -912,7 +1058,10 @@ for (const scenario of [backendUnavailable, slowBackend, emptyProject, failedPat
                         pageWorkspace, pageZoomKeepsCoordinates,
                         pageDrawAndDelete, pageEscapeAndDelete, pageOcrAndFailures,
                         pagePreviewAndExport, pagePreviewFlagsRegions,
-                        pageWithNoImage, projectsHome, pagePanelTextareas, pagePanelApprove, pageChapters,
+                        pageWithNoImage, projectsHome,
+                        pagePanelTextareas, pagePanelApprove,
+                        pageProductionAreaDraw, pageProductionAreaMoveAndResize,
+                        pageProductionAreaClear, pageProductionAreaNotOfferedForSfx, pageChapters,
                         pageImportUsesTheSelectedChapter, apiBaseIsHonoured]) {
   await scenario();
 }

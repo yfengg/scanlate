@@ -147,6 +147,12 @@ MIGRATIONS: list[str] = [
     );
     CREATE INDEX idx_resolutions_segment ON issue_resolutions(segment_id);
     """,
+    # 2 — explicit page-production area, independent of region/OCR geometry.
+    #     NULL for every existing row: rendering falls back to the legacy
+    #     auto-inset path exactly as before this column existed.
+    """
+    ALTER TABLE segments ADD COLUMN production_box_json TEXT;
+    """,
 ]
 
 

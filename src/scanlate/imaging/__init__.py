@@ -6,8 +6,8 @@ import ``storage`` themselves, and importing them here would close the loop.
 """
 from __future__ import annotations
 
-from .layout import (BoundingBox, MaskRef, Polygon, Region, RegionKind, RenderSettings,
-                     TextOrientation, region_from_dict, region_to_dict,
+from .layout import (BoundingBox, MaskRef, Polygon, Region, RegionKind, RegionSource,
+                     RenderSettings, TextOrientation, region_from_dict, region_to_dict,
                      render_from_dict, render_to_dict)
 
 _LAZY = {
@@ -16,7 +16,7 @@ _LAZY = {
     "TextRegionDetector": ".detection", "DetectedRegion": ".detection",
     "DetectorError": ".detection", "DetectorUnavailable": ".detection",
     "OpenCvComicTextDetector": ".detection", "NullDetector": ".detection",
-    "build_detector": ".detection",
+    "CtdComicTextDetector": ".detection", "build_detector": ".detection",
     "OcrBackend": ".ocr", "OcrResult": ".ocr", "OcrError": ".ocr",
     "TesseractOcr": ".ocr", "NullOcr": ".ocr", "build_ocr": ".ocr",
     "MangaOcr": ".manga_ocr_backend", "OcrRouter": ".manga_ocr_backend",
@@ -33,6 +33,6 @@ def __getattr__(name: str):
     return getattr(import_module(module_name, __name__), name)
 
 
-__all__ = ["BoundingBox", "Polygon", "Region", "RegionKind", "RenderSettings",
+__all__ = ["BoundingBox", "Polygon", "Region", "RegionKind", "RegionSource", "RenderSettings",
            "TextOrientation", "MaskRef", "region_to_dict", "region_from_dict",
            "render_to_dict", "render_from_dict", *_LAZY]

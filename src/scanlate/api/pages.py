@@ -10,7 +10,7 @@ from __future__ import annotations
 import uuid
 from io import BytesIO
 
-from fastapi import APIRouter, File, Form, HTTPException, UploadFile
+from fastapi import APIRouter, Body, File, Form, HTTPException, UploadFile
 from fastapi.responses import Response
 from pydantic import BaseModel
 
@@ -41,6 +41,13 @@ class RegionPatch(BaseModel):
     kind: SegmentKind | None = None
     language: str | None = None
     orientation: TextOrientation | None = None
+
+
+class ProductionBoxIn(BaseModel):
+    x: int
+    y: int
+    width: int
+    height: int
 
 
 class SourceIn(BaseModel):
@@ -222,6 +229,18 @@ def build_page_router(services) -> APIRouter:
             raise HTTPException(400, "A region move or resize needs x, y, width and height.")
         try:
             pages.update_region(segment_id, box, body.kind, body.language, body.orientation)
+        except RegionError as error:
+            raise HTTPException(400, str(error))
+        return view(segment_id)
+
+    @router.patch("/api/segments/{segment_id}/production")
+    def set_production_box(segment_id: str, body: ProductionBoxIn | None = Body(default=None)):
+        """Set (body is a box) or clear (body is null) the explicit
+        production area. Independent of /region in both directions."""
+        segment_or_404(segment_id)
+        box = BoundingBox(body.x, body.y, body.width, body.height) if body is not None else None
+        try:
+            pages.set_production_box(segment_id, box)
         except RegionError as error:
             raise HTTPException(400, str(error))
         return view(segment_id)

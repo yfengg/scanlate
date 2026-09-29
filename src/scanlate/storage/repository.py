@@ -13,8 +13,8 @@ import json
 import sqlite3
 
 from ..core.types import SegmentKind
-from ..imaging.layout import (region_from_dict, region_to_dict,
-                              render_from_dict, render_to_dict)
+from ..imaging.layout import (box_from_dict, box_to_dict, region_from_dict,
+                              region_to_dict, render_from_dict, render_to_dict)
 from .models import (Chapter, LocalContext, Origin, Page, Project, Segment,
                      SegmentContext, SegmentState, Status)
 from .unit_of_work import UnitOfWork
@@ -109,11 +109,12 @@ class ProjectRepository:
         with self.uow.transaction():
             self.conn.execute(
                 "INSERT INTO segments (id, project_id, page_id, seq, kind, language, source_text, "
-                "region_json, render_json, mask_ref) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                "region_json, render_json, mask_ref, production_box_json) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 (segment.id, segment.project_id, segment.page_id, segment.seq,
                  SegmentKind(segment.kind).value, segment.language, segment.source_text,
                  _dump(region_to_dict(segment.region)), _dump(render_to_dict(segment.render)),
-                 segment.mask_ref))
+                 segment.mask_ref, _dump(box_to_dict(segment.production_box))))
             self.conn.execute(
                 "INSERT INTO segment_state (segment_id, candidate, status, origin) "
                 "VALUES (?, ?, ?, ?)",
@@ -131,6 +132,7 @@ class ProjectRepository:
             language=row["language"], page_id=row["page_id"], mask_ref=row["mask_ref"],
             region=region_from_dict(_load(row["region_json"])),
             render=render_from_dict(_load(row["render_json"])),
+            production_box=box_from_dict(_load(row["production_box_json"])),
             state=SegmentState(
                 candidate=row["candidate"],
                 status=Status(row["status"] or "machine"),
@@ -212,12 +214,21 @@ class ProjectRepository:
         self.conn.execute("UPDATE segments SET render_json = ? WHERE id = ?",
                           (_dump(render_to_dict(render)), segment_id))
 
+    def set_production_box(self, segment_id: str, box) -> None:
+        """Set or clear the explicit production area, independent of the
+        text region: never touches region_json/render_json, and is never
+        touched by set_region/set_render. ``box=None`` clears it, restoring
+        the legacy auto-inset render path."""
+        self.conn.execute("UPDATE segments SET production_box_json = ? WHERE id = ?",
+                          (_dump(box_to_dict(box)), segment_id))
+
     def delete_segment(self, segment_id: str) -> None:
         self.conn.execute("DELETE FROM segments WHERE id = ?", (segment_id,))
 
     def detach_from_page(self, segment_id: str) -> None:
-        self.conn.execute("UPDATE segments SET page_id = NULL, region_json = NULL WHERE id = ?",
-                          (segment_id,))
+        self.conn.execute(
+            "UPDATE segments SET page_id = NULL, region_json = NULL, "
+            "production_box_json = NULL WHERE id = ?", (segment_id,))
 
     def list_page_segments(self, page_id: str) -> list[Segment]:
         rows = self.conn.execute(self._SELECT + "WHERE s.page_id = ? ORDER BY s.seq", (page_id,))
