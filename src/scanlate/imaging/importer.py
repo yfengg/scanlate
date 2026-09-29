@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import hashlib
 import re
+import shutil
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -106,6 +107,13 @@ class MediaStore:
         path.mkdir(parents=True, exist_ok=True)
         return path
 
+    def delete_project(self, project_id: str) -> None:
+        """Remove every file stored for this project (source images and
+        exports). Safe to call even if nothing was ever imported."""
+        path = self.root / self._component(project_id, "project id")
+        if path.exists():
+            shutil.rmtree(path)
+
     def store(self, project_id: str, data: bytes, info: ImageInfo) -> str:
         """Write the image and return the reference kept in the database.
 
@@ -137,19 +145,30 @@ class MediaStore:
     def path(self, reference: str) -> Path:
         """Resolve a stored reference, refusing anything outside the root.
 
+        Accepts either a source reference (``project_id/filename``, from
+        ``store``) or an export reference (``project_id/exports/filename``,
+        from ``store_export``) — the only two shapes this class ever hands
+        out, so "exports" is checked literally rather than allowing an
+        arbitrary subdirectory.
+
         Containment is checked with real path semantics, not a string prefix:
         ``/media-evil`` starts with ``/media`` but is a different directory, and
         symlinks resolve before the check.
         """
         parts = (reference or "").replace("\\", "/").split("/")
-        if len(parts) != 2:
+        if len(parts) == 2:
+            project_id, filename = parts
+            middle = ()
+        elif len(parts) == 3 and parts[1] == "exports":
+            project_id, filename = parts[0], parts[2]
+            middle = ("exports",)
+        else:
             raise ImageError(f"Invalid image reference: {reference!r}")
-        project_id, filename = parts
         self._component(project_id, "project id")
         self._component(filename, "filename")
 
         root = self.root.resolve()
-        candidate = (root / project_id / filename).resolve()
+        candidate = (root / project_id / Path(*middle) / filename).resolve()
         if not candidate.is_relative_to(root):
             raise ImageError("Invalid image reference.")
         return candidate

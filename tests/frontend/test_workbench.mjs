@@ -580,6 +580,57 @@ async function projectsHome() {
   ok(errors.length === 0, `the projects screen throws nothing (${errors.map(String)})`);
 }
 
+async function projectDeletion() {
+  console.log("project deletion");
+  const calls = [];
+  const projects = [
+    { id: "demo", name: "Yoru no Kissaten", default_source_language: "ja", target_language: "en",
+      chapters: [{ id: "ch1", number: 1, title: "One" }], pages: [], segment_count: 3 },
+  ];
+  const { window, document, errors } = await boot((url, options = {}) => {
+    calls.push({ url, method: options.method || "GET" });
+    if (url.endsWith("/api/projects") && options.method === "DELETE") return json({ deleted: "demo" });
+    if (url.endsWith("/api/projects")) return json(projects);
+    if (url.includes("/health")) return json({ translation: { names: ["lexicon"], development: true },
+                                               ocr: { name: "router" } });
+    return json({});
+  }, { url: "http://localhost/" });
+
+  ok(document.querySelector('button[data-home="delete-project"]'),
+     "each project on the home screen has a Delete control");
+
+  window.confirm = () => false;
+  document.querySelector('button[data-home="delete-project"]').click();
+  await settle(60);
+  ok(!calls.some(c => c.method === "DELETE"), "declining the confirmation sends nothing");
+  ok(document.querySelector('button[data-open="demo"]'), "the project is still listed after declining");
+
+  window.confirm = () => true;
+  document.querySelector('button[data-home="delete-project"]').click();
+  await settle(80);
+  const deletion = calls.find(c => c.method === "DELETE");
+  ok(deletion && deletion.url.endsWith("/api/projects/demo"), "confirming deletes the right project");
+  ok(errors.length === 0, `project deletion throws nothing (${errors.map(String)})`);
+}
+
+async function openingADeletedProjectShowsNotFound() {
+  console.log("opening a deleted project");
+  const { window, document, errors } = await boot((url, options = {}) => {
+    if (url.includes("/segments")) return json(null, 404);
+    if (url.includes("/health")) return json({ translation: { names: ["lexicon"], development: true },
+                                               ocr: { name: "router" } });
+    return json({});
+  }, { url: "http://localhost/?project=demo" });
+
+  ok(document.getElementById("view").textContent.includes("Project not found"),
+     "a deleted/nonexistent project says so, not \"Can't reach the backend\"");
+  ok(!document.getElementById("view").textContent.includes("Can't reach the backend"),
+     "the 404 case is not misreported as a connectivity failure");
+  ok(document.querySelector('button[data-home="home"]'),
+     "there is a way back to the projects list");
+  ok(errors.length === 0, `the not-found screen throws nothing (${errors.map(String)})`);
+}
+
 async function pageOcrAndFailures() {
   console.log("page OCR and failures");
   const calls = [];
@@ -619,6 +670,7 @@ async function pagePreviewAndExport() {
       results: [{ segment_id: "s1", kind: "speech_bubble", rendered: true, reason: null }],
       flagged: [] }),
     "/export": () => json({ reference: "demo/exports/chapter-1-page-1-translated.png",
+                            url: "/api/projects/demo/exports/chapter-1-page-1-translated.png",
                             report: { results: [], flagged: [] } }),
   }));
 
@@ -653,6 +705,11 @@ async function pagePreviewAndExport() {
      "Export posts to the export endpoint");
   ok(document.querySelector(".panel .ocr-note")?.textContent.includes("Exported to"),
      "the export result is shown as a note");
+  const downloadLink = document.querySelector(".panel .ocr-note a");
+  ok(downloadLink, "the export note includes an actual download link, not just a path string");
+  ok(downloadLink?.getAttribute("href") === "/api/projects/demo/exports/chapter-1-page-1-translated.png",
+     `the download link points at the real export URL (${downloadLink?.getAttribute("href")})`);
+  ok(downloadLink?.hasAttribute("download"), "the link triggers a download rather than navigation");
 
   document.querySelector('button[data-page="mode-edit"]').click();
   await settle(50);
@@ -1014,6 +1071,8 @@ async function apiBaseIsHonoured() {
     if (path.endsWith("/api/projects/demo")) return json({ ...PROJECT.project,
       chapters: CHAPTERS, pages: [PAGE_FIXTURE] });
     if (path.endsWith("/pages")) return json([PAGE_FIXTURE]);
+    if (path.includes("/export")) return json({ reference: "demo/exports/p1.png",
+      url: "/api/projects/demo/exports/p1.png", report: { results: [], flagged: [] } });
     if (path.includes("/api/pages/pg1")) return json(PAGE_FIXTURE);
     if (path.includes("/region")) return json({ segment_id: "s1", outcome: "deleted" });
     if (path.includes("/api/segments/")) return json(SEGMENT);
@@ -1028,6 +1087,14 @@ async function apiBaseIsHonoured() {
        .map(c => c.url).slice(0, 2)})`);
   const image = document.querySelector("#stage img")?.getAttribute("src");
   ok(image && image.startsWith(base), `the page image uses the base (${image})`);
+
+  // The export download link is built client-side from a relative URL the
+  // server returns, so it needs the base prefixed same as any bare fetch.
+  document.querySelector('button[data-page="export"]').click();
+  await settle(80);
+  const downloadLink = document.querySelector(".panel .ocr-note a");
+  ok(downloadLink && downloadLink.getAttribute("href").startsWith(base),
+     `the export download link uses the base (${downloadLink?.getAttribute("href")})`);
 
   // Region deletion is a bare fetch, so it needs the base explicitly.
   document.querySelector('.region[data-segment="s1"]').dispatchEvent(
@@ -1047,7 +1114,7 @@ async function apiBaseIsHonoured() {
   window.FormData = function () { return form; };
   await window.importPageFile({ name: "p.png" });
   await settle(120);
-  const upload = calls.find(c => c.method === "POST" && c.url.includes("/pages"));
+  const upload = calls.find(c => c.method === "POST" && c.url.endsWith("/pages"));
   ok(upload && upload.url.startsWith(base), `the page upload uses the base (${upload?.url})`);
   ok(errors.length === 0, `the API base path throws nothing (${errors.map(String)})`);
 }
@@ -1058,7 +1125,7 @@ for (const scenario of [backendUnavailable, slowBackend, emptyProject, failedPat
                         pageWorkspace, pageZoomKeepsCoordinates,
                         pageDrawAndDelete, pageEscapeAndDelete, pageOcrAndFailures,
                         pagePreviewAndExport, pagePreviewFlagsRegions,
-                        pageWithNoImage, projectsHome,
+                        pageWithNoImage, projectsHome, projectDeletion, openingADeletedProjectShowsNotFound,
                         pagePanelTextareas, pagePanelApprove,
                         pageProductionAreaDraw, pageProductionAreaMoveAndResize,
                         pageProductionAreaClear, pageProductionAreaNotOfferedForSfx, pageChapters,

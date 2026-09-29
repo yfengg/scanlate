@@ -362,6 +362,42 @@ def test_detaching_an_approved_region_clears_its_production_box(client):
     assert kept.production_box is None
 
 
+# --- project deletion ----------------------------------------------------
+def test_deleting_a_project_removes_it_and_everything_in_it(client):
+    page = import_page(client).json()
+    segment = client.post(f"/api/pages/{page['id']}/regions",
+                          json={"x": 40, "y": 40, "width": 260, "height": 90,
+                                "language": "ja", "source_text": "行くぞ！"}).json()
+    client.post(f"/api/segments/{segment['id']}/approve", json={"translation": "Let's go!"})
+    source = client.services.repository.get_page(page["id"])
+    image_path = client.services.media.path(source.image_path)
+    assert image_path.exists()
+
+    response = client.delete("/api/projects/demo")
+    assert response.status_code == 200
+    assert response.json() == {"deleted": "demo"}
+
+    assert client.get("/api/projects/demo").status_code == 404
+    assert client.get(f"/api/pages/{page['id']}").status_code == 404
+    assert client.get(f"/api/segments/{segment['id']}").status_code == 404
+    assert client.services.repository.get_segment(segment["id"]) is None
+    assert not image_path.exists()
+    assert not (client.services.media.root / "demo").exists()
+
+
+def test_deleting_a_nonexistent_project_is_404(client):
+    response = client.delete("/api/projects/does-not-exist")
+    assert response.status_code == 404
+
+
+def test_deleting_a_project_is_safe_when_nothing_was_ever_imported(client):
+    project = client.post("/api/projects", json={"name": "Empty project",
+                                                  "default_source_language": "ja",
+                                                  "target_language": "en"}).json()
+    response = client.delete(f"/api/projects/{project['id']}")
+    assert response.status_code == 200
+
+
 # --- OCR ----------------------------------------------------------------
 def test_ocr_writes_source_text_onto_the_segment(client):
     # This fixture's rendered text is Latin, so it needs Tesseract

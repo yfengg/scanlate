@@ -175,6 +175,24 @@ def test_export_uses_a_predictable_filename_from_chapter_and_page_identity(clien
     assert response.json()["reference"] == "demo/exports/chapter-2-page-3-translated.png"
 
 
+def test_export_response_includes_a_downloadable_url(client):
+    # The API previously returned only a filesystem-style reference string
+    # with no way for a browser user to actually retrieve the file.
+    page = import_page(client).json()
+    region = create_region(client, page["id"], BLANK_AREA)
+    approve(client, region["id"], "Hi!")
+
+    body = client.post(f"/api/pages/{page['id']}/export").json()
+    assert body["url"] == f"/api/projects/{body['reference']}"
+
+    download = client.get(body["url"])
+    assert download.status_code == 200
+    assert download.headers["content-type"] == "image/png"
+    assert "attachment" in download.headers["content-disposition"]
+    with Image.open(io.BytesIO(download.content)) as exported:
+        assert exported.size == (520, 720)
+
+
 def test_exported_png_matches_the_original_dimensions(client):
     page = import_page(client).json()
     region = create_region(client, page["id"], BLANK_AREA)

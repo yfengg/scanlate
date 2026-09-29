@@ -38,6 +38,14 @@ class ProjectRepository:
         return Project(row["id"], row["name"], row["default_source_language"],
                        row["target_language"]) if row else None
 
+    def delete_project(self, project_id: str) -> None:
+        """Everything under this project — chapters, pages, segments, glossary,
+        translation memory — cascades at the schema level (``ON DELETE
+        CASCADE``, enabled via ``PRAGMA foreign_keys = ON`` in ``connect()``).
+        This is the one statement that has to run; media files on disk are a
+        separate concern the caller (``PageService``/API layer) handles."""
+        self.conn.execute("DELETE FROM projects WHERE id = ?", (project_id,))
+
     def list_projects(self) -> list[Project]:
         return [Project(r["id"], r["name"], r["default_source_language"], r["target_language"])
                 for r in self.conn.execute("SELECT * FROM projects ORDER BY created_at")]

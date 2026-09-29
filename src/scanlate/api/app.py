@@ -132,6 +132,14 @@ def create_app(services=None, seed: bool | None = None) -> FastAPI:
         return schemas.project(project, services.repository.list_chapters(project_id),
                                services.repository.list_pages(project_id))
 
+    @app.delete("/api/projects/{project_id}")
+    def delete_project(project_id: str):
+        project_or_404(project_id)
+        with services.uow.transaction():
+            services.repository.delete_project(project_id)
+        services.media.delete_project(project_id)
+        return {"deleted": project_id}
+
     @app.get("/api/projects/{project_id}/segments")
     def list_segments(project_id: str, page_id: str | None = None):
         project = project_or_404(project_id)

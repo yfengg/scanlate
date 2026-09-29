@@ -168,7 +168,20 @@ def build_page_router(services) -> APIRouter:
             reference, report = pages.export_page(page_id)
         except ImageError as error:
             raise HTTPException(404, str(error))
-        return {"reference": reference, "report": schemas.render_report(report)}
+        return {"reference": reference, "url": f"/api/projects/{reference}",
+                "report": schemas.render_report(report)}
+
+    @router.get("/api/projects/{project_id}/exports/{filename}")
+    def get_export(project_id: str, filename: str):
+        """Serves an exported PNG for direct download — the only way to
+        actually get the file the export reference points at without
+        filesystem access to the media root."""
+        try:
+            data = services.media.read(f"{project_id}/exports/{filename}")
+        except ImageError as error:
+            raise HTTPException(404, str(error))
+        return Response(content=data, media_type="image/png",
+                        headers={"Content-Disposition": f'attachment; filename="{filename}"'})
 
     @router.get("/api/pages/{page_id}/segments")
     def page_segments(page_id: str):

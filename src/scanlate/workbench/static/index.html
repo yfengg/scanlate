@@ -299,6 +299,12 @@ async function load() {
   view.innerHTML = `<div class="empty"><h2>Loading</h2><p>Running the translation pipeline.</p></div>`;
   try {
     const res = await fetch(`${API}/api/projects/${PROJECT_ID}/segments`);
+    if (res.status === 404) {
+      view.innerHTML = `<div class="empty"><h2>Project not found</h2>
+        <p>This project no longer exists — it may have been deleted.</p>
+        <button class="quiet" data-home="home">Back to projects</button></div>`;
+      return;
+    }
     if (!res.ok) throw new Error(`${res.status} ${res.statusText}`);
     const payload = await res.json();
     state.data = {
@@ -701,13 +707,17 @@ function renderProjects(view) {
       <section class="card">
         <h2>Existing projects</h2>
         ${projects.length ? `<ul class="project-list">${projects.map(p => `
-          <li><button class="project" data-open="${esc(p.id)}">
-            <span class="name">${esc(p.name)}</span>
-            <span class="meta">${esc(p.default_source_language)} → ${esc(p.target_language)}
-              · ${p.chapters.length} chapter${p.chapters.length === 1 ? "" : "s"}
-              · ${p.pages.length} page${p.pages.length === 1 ? "" : "s"}
-              · ${p.segment_count} segment${p.segment_count === 1 ? "" : "s"}</span>
-          </button></li>`).join("")}</ul>`
+          <li class="project-row">
+            <button class="project" data-open="${esc(p.id)}">
+              <span class="name">${esc(p.name)}</span>
+              <span class="meta">${esc(p.default_source_language)} → ${esc(p.target_language)}
+                · ${p.chapters.length} chapter${p.chapters.length === 1 ? "" : "s"}
+                · ${p.pages.length} page${p.pages.length === 1 ? "" : "s"}
+                · ${p.segment_count} segment${p.segment_count === 1 ? "" : "s"}</span>
+            </button>
+            <button class="quiet danger" data-home="delete-project" data-project="${esc(p.id)}"
+              title="Delete ${esc(p.name)}">Delete</button>
+          </li>`).join("")}</ul>`
         : `<p class="hint">No projects yet. Create one to start.</p>`}
       </section>
     </div>`;
@@ -724,6 +734,17 @@ async function createProject() {
     });
     await openProject(project.id);
   } catch (error) { fail(error); }
+}
+
+async function deleteProject(projectId) {
+  const project = (state.projects || []).find(p => p.id === projectId);
+  const name = project ? project.name : projectId;
+  if (!confirm(`Delete "${name}" and everything in it? This can't be undone.`)) return;
+  try {
+    await request(`/api/projects/${projectId}`, "DELETE");
+  } catch (error) { fail(error); return; }
+  if (PROJECT_ID === projectId) goHome();
+  else await loadProjects();
 }
 
 async function openProject(projectId) {
@@ -748,10 +769,12 @@ function goHome() {
 document.addEventListener("click", e => {
   const open = e.target.closest("[data-open]");
   if (open) { openProject(open.dataset.open); return; }
-  const action = e.target.closest("[data-home]")?.dataset.home;
+  const homeButton = e.target.closest("[data-home]");
+  const action = homeButton?.dataset.home;
   if (action === "create") createProject();
   if (action === "retry") load();
   if (action === "home") goHome();
+  if (action === "delete-project") deleteProject(homeButton.dataset.project);
 });
 
 document.addEventListener("keydown", e => {
@@ -1063,7 +1086,9 @@ function translationHTML(segment) {
 }
 
 function noteHTML(note) {
-  return `<p class="ocr-note" data-level="${note.level}">${esc(note.text)}</p>`;
+  const link = note.href
+    ? ` <a href="${esc(note.href)}" download target="_blank" rel="noopener">Download PNG</a>` : "";
+  return `<p class="ocr-note" data-level="${note.level}">${esc(note.text)}${link}</p>`;
 }
 
 function fitIfNeeded() {
@@ -1145,7 +1170,7 @@ async function pageAction(action, element) {
       page.busy = true; render();
       const result = await request(`/api/pages/${page.id}/export`, "POST");
       const flaggedCount = result.report.flagged.length;
-      page.note = { level: flaggedCount ? "warn" : "info",
+      page.note = { level: flaggedCount ? "warn" : "info", href: `${API}${result.url}`,
         text: `Exported to ${result.reference}` + (flaggedCount
           ? ` — ${flaggedCount} region${flaggedCount === 1 ? "" : "s"} need manual handling.`
           : ".") };
