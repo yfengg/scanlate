@@ -10,8 +10,10 @@ general-purpose LLM is used for translation, OCR, or region detection.
 pip install -e '.[dev,fuzzy]'
 SCANLATE_DB=scanlate.db SCANLATE_MEDIA=media python -m scanlate   # http://127.0.0.1:8000
 
-python -m pytest                        # 216 tests
-node tests/frontend/test_workbench.mjs  # 105 jsdom checks (npm install first)
+python -m pytest                        # 314 tests (1 skip without a detector finding
+                                         # anything on a blank synthetic page; 0 failures
+                                         # with the tesseract binary on PATH)
+node tests/frontend/test_workbench.mjs  # 175 jsdom checks (npm install first)
 python tools/ocr_bench.py               # vertical-Japanese page, Tesseract vs manga-ocr
 ```
 
@@ -24,8 +26,13 @@ cannot install. `.[mangaocr]` adds manga-ocr for Japanese.
 
 Environment: `SCANLATE_DB` (`:memory:`), `SCANLATE_MEDIA` (`media`),
 `SCANLATE_BACKEND` (`auto|opus|lexicon`), `SCANLATE_OCR`
-(`auto|tesseract|manga-ocr|none`), `SCANLATE_DETECTOR` (`opencv|none`),
-`SCANLATE_DEMO=1` (seed fixture project), `SCANLATE_HOST`/`SCANLATE_PORT`.
+(`auto|tesseract|manga-ocr|none`), `SCANLATE_DETECTOR`
+(`auto|ctd|opencv|none`, default `auto`: prefers comic-text-detector, falls
+back to OpenCV, then none), `SCANLATE_CTD_PYTHON`/`SCANLATE_CTD_SCRIPT`
+(comic-text-detector's out-of-process interpreter/bridge script — see
+`tools/ctd_bridge.py`; unset means `auto` silently resolves to OpenCV, exactly
+as before this existed), `SCANLATE_DEMO=1` (seed fixture project),
+`SCANLATE_HOST`/`SCANLATE_PORT`.
 
 The frontend is one file: `src/scanlate/workbench/static/index.html`, vanilla
 JS, no build step. It is served by the same FastAPI process as the API, so
@@ -181,6 +188,60 @@ at first use. Do not relax either without porting the backend.
   "OCR object", and anything created here runs through `TranslationPipeline`
   unchanged.
 
+### Manga-specific detection (comic-text-detector) and prepared segments
+
+`comic-text-detector` (dmMaze/comic-text-detector, GPL-3.0) is the preferred
+detector (`SCANLATE_DETECTOR=auto`, the default), with `OpenCvComicTextDetector`
+as fallback and manual regions always available regardless — see
+`imaging/detection.py::CtdComicTextDetector`. It runs **out of process**: a
+narrow file/JSON contract (box, box confidence if the reference wrapper
+happened to expose one, a vertical flag, an optional mask polygon), never an
+in-process import. `tools/ctd_bridge.py` is the bridge script, run with a
+*separate* Python environment the operator prepares (its own docstring has
+setup steps); Scanlate's own repository and process never contain
+comic-text-detector's code. This is a cleaner separation, not a complete
+license analysis — revisit if Scanlate's own licensing posture changes.
+
+`detect_regions()` now does more than create boxes: for each region it
+creates, it also runs OCR immediately (hinted with the project's default
+source language, since a fresh segment's own `language` is `None` until the
+pipeline first resolves it — passing no hint routes a language-aware OCR
+backend to its default, not the language-specific one) and attempts an
+automatic production area (`imaging/production_area.py::infer_production_area`,
+a separate, conservative outward-growth algorithm from `BubbleCleaner`'s own
+checks — grows a tight text box outward in small steps, all four sides
+evaluated from the same snapshot each round and applied together, no side
+required to succeed, capped relative to the box's own size, with a final
+whole-margin sanity check). One region's OCR or production-area failure never
+stops the rest of the page; it's simply left exactly as usable as a
+freshly hand-drawn region.
+
+Two new fields ride inside the existing `region_json` — no migration:
+`Region.source` (`manual`/`detected`) and `Region.confidence`. `detected` is
+**provenance only, not a review gate**: its translation is generated exactly
+like a manual region's, nothing blocks on a human looking at it first, and
+there is no separate "confirm" click. Editing/moving/resizing a region (any
+`update_region` call that touches geometry) flips `source` back to `manual`
+automatically. `Region.polygon` — previously unused — now carries a
+detector's real text-segmentation outline when one exists.
+
+`BubbleCleaner.inspect()` prefers a real mask over both of its own estimates
+when one is given (`imaging/cleanup.py`): ground truth beats guessing. The
+existing legacy-inset and statistical-foreground paths are unchanged and
+remain the fallback for manual regions and for detectors (OpenCV) that only
+draw boxes.
+
+A rectangle inscribing a round bubble always has corners that can land
+outside the bubble's true edge, and a long growth band or margin strip can
+dilute a small patch of real art into an average that still looks safe.
+`infer_production_area` corrects both: `_revert_bad_corners()` re-checks each
+of the four corners the straight per-side bands never test on their own, and
+`_region_is_safe()` tests every band and margin strip in small square chunks
+rather than one pooled average. Confirmed against one real manga page (see
+"Known bugs" below for what that page did and did not exercise) — not proof
+the class of problem is closed on pages with different bubble shapes or
+denser art.
+
 ## Frontend workflow
 
 **Projects** (home, shown when no `?project=`) → new project (name, source
@@ -212,10 +273,37 @@ scoped to `.seg` cards (Review); the Page panel's boxes are not inside one.
 4. Page import, regions, detection, OCR, segment linkage.
 5. Projects/chapters UI, no demo data at startup, language-aware OCR routing,
    backend visibility.
+6. Page-rendering core (cleanup, typesetting, SFX captions, preview/export),
+   an explicit `production_box` independent of OCR/selection geometry, and
+   manga-specific detection (comic-text-detector, out of process) that OCRs
+   and prepares a production area automatically as part of `detect_regions`.
 
 ## Known bugs (open, diagnosed)
 
-None currently open.
+Audited end-to-end against one real manga page
+(`evaluation/real_pages/`, gitignored — never committed). That page found and
+fixed a specific corner/dilution bleed mechanism in `infer_production_area`
+(see "Manga-specific detection" above). It did not exercise, and does not
+close, the following — treat all four as open until a page that does
+exercise them is clean:
+
+1. **The detector can still swallow artwork on other real pages.** The
+   corner-reversion and chunked-band fixes address the specific mechanism
+   found on the one page audited; a page with different bubble shapes, denser
+   screentone, or art positioned differently relative to text could still
+   trigger a case those fixes don't cover.
+2. **Floating/non-bubble text disappearing from Preview.** Investigated, not
+   reproduced — the audited page had no container-less floating text, and no
+   code path was found where an unapproved or flagged segment's original
+   pixels are actually removed. Unconfirmed either way, not fixed.
+3. **Confusing region vs. production-area overlay interaction and cursor.**
+   The Page-workbench overlays for a region and its production area (see
+   "Manga-specific detection" and the production-area draw/move/resize
+   handlers in `index.html`) can be unclear about which one a drag or the
+   move/cross cursor is currently acting on. Not investigated in this pass.
+4. **Translation quality.** Out of scope for this pass (translation
+   architecture wasn't touched) and not evaluated against real-page output
+   quality.
 
 ## Recently fixed
 
@@ -280,29 +368,9 @@ Advanced/generative inpainting, font matching, stylized SFX reconstruction,
 Korean/Chinese production optimization, automatic long-strip splitting, cloud
 storage, collaboration, accounts.
 
-## Next milestone — Basic Page Production
+## Pending, small
 
-An approved page becomes an exported translated PNG. Deliberately simple.
-
-1. **Cleanup** — cover original lettering in ordinary white/flat-colour bubbles
-   only. No generative inpainting. Preserve artwork and borders. If a region
-   can't be cleaned safely by the simple method, **flag it for manual handling
-   rather than damaging the page**.
-2. **Deterministic typesetting** — fit the approved translation inside its
-   region: wrapping, margins, alignment, font-size reduction, all deterministic.
-   Never overflow silently. Persist settings (`RenderSettings` /`render_json`
-   already exists) so the page re-renders identically.
-3. **SFX** — do not erase or redraw stylized SFX. Preserve the original and add
-   the approved English as a small nearby caption.
-4. **Preview** — a Page-workbench toggle between editing view and translated
-   preview.
-5. **Export** — PNG at original page dimensions, predictable filename, never
-   overwriting the imported source image.
-
-Target loop: new project → chapter → import page → detect/draw → OCR → MT →
-correct → approve → preview → export PNG.
-
-Also pending, small: an evaluation fixture for translation quality storing
+An evaluation fixture for translation quality storing
 Japanese source, machine candidate(s), preferred reading, and whether a failure
 is OCR, segmentation, or MT — so backends can be compared later. Seed it with
 `聞いていただけるのですかァ!` (MT gives "Please listen to me!" / "Do you hear

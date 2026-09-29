@@ -20,3 +20,12 @@ media/
 .env
 .env.*
 !.env.example
+
+# Disposable spikes: throwaway experiments (e.g. external-detector evaluation),
+# never a source of truth, never committed unless explicitly promoted.
+.scratch/
+
+# Real-page evaluation benchmarks: real (likely copyrighted) manga pages used
+# for local QA, and whatever they produce. Never redistributed.
+evaluation/real_pages/
+evaluation/output/
